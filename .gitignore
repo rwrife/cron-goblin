@@ -1,0 +1,22 @@
+# Go
+/goblin
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+*.prof
+coverage.*
+
+# Build / release
+goreleaser-dist/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local config
+.goblinrc
+*.local
