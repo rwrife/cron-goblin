@@ -33,16 +33,21 @@ every-minute loops, and expressions that never fire.
 
 ## Status
 
-🚧 Early. See [`PLAN.md`](./PLAN.md) for the full roadmap (M1–M6) and backlog.
+🚧 Early. **M1 (scaffold) is done** — the binary builds, runs, and greets you.
+Subcommands (`explain`, `next`, `lint`, `from`) land in M2–M6. See
+[`PLAN.md`](./PLAN.md) for the full roadmap and backlog.
 
 ## Install
 
-Coming with M6 (`go install` / prebuilt binaries). For now:
+Prebuilt binaries and `go install` arrive with M6. For now, build from source
+(Go 1.22+):
 
 ```bash
 git clone https://github.com/rwrife/cron-goblin
 cd cron-goblin
-go run ./cmd/goblin
+go run ./cmd/goblin            # greeting + version
+go run ./cmd/goblin --version  # cron-goblin 0.1.0-dev
+go run ./cmd/goblin --quiet    # no goblin grumbling on stderr
 ```
 
 ## License
