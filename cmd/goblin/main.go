@@ -1,9 +1,8 @@
 // Command goblin is the cron-goblin CLI: a grumpy gremlin that translates cron
 // gibberish into plain English, previews fire times, and lints your crontab.
 //
-// M1 ships only the scaffold: a cobra root command that greets you and reports
-// its version. Subcommands (explain, next, lint, from) arrive in later
-// milestones — see PLAN.md.
+// M1 shipped the scaffold; M2 adds `explain`. Further subcommands (next, lint,
+// from) arrive in later milestones — see PLAN.md.
 package main
 
 import (
@@ -42,7 +41,7 @@ func newRootCmd(version string) *cobra.Command {
 			"fire, and shrieks when two of them collide at 3am. Design-time,\n" +
 			"offline, account-free. It never runs your jobs — it just judges them.",
 		Version: version,
-		// No subcommand yet: greet, then show help so users see what's coming.
+		// With no subcommand: greet, then point at what's available.
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !quiet {
 				// Persona goes to stderr so stdout stays clean for scripts.
@@ -50,7 +49,7 @@ func newRootCmd(version string) *cobra.Command {
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "cron-goblin %s\n", version)
 			fmt.Fprintln(cmd.OutOrStdout(),
-				"No subcommands yet — this is M1 (scaffold). See `goblin --help` and PLAN.md.")
+				"Try `goblin explain \"*/15 9-17 * * 1-5\"`. See `goblin --help` and PLAN.md.")
 			return nil
 		},
 		SilenceUsage:  true,
@@ -62,6 +61,9 @@ func newRootCmd(version string) *cobra.Command {
 
 	// Friendlier `--version` output than cobra's default "goblin version X".
 	cmd.SetVersionTemplate("cron-goblin {{.Version}}\n")
+
+	// Wire up subcommands.
+	cmd.AddCommand(newExplainCmd())
 
 	return cmd
 }

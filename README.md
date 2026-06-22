@@ -20,9 +20,13 @@ English. cron-goblin works on your **whole crontab at once** — previewing real
 fire times in your timezone and **linting across jobs** to catch overlaps,
 every-minute loops, and expressions that never fire.
 
-## What it does (planned)
+## What it does
 
-- **`goblin explain "<expr>"`** — plain-English description + the next few runs.
+- **`goblin explain "<expr>"`** — plain-English description of a cron expression
+  (with `--json` for scripts/agents). ✅ *available now*
+
+Planned next:
+
 - **`goblin next "<expr>" -n 20`** — the next N fire times in your timezone.
 - **`goblin lint <crontab>`** — flags dead expressions, every-minute jobs, and
   same-minute collisions between jobs.
@@ -33,8 +37,14 @@ every-minute loops, and expressions that never fire.
 
 ## Status
 
-🚧 Early. **M1 (scaffold) is done** — the binary builds, runs, and greets you.
-Subcommands (`explain`, `next`, `lint`, `from`) land in M2–M6. See
+🚧 Early, but moving.
+
+- **M1 (scaffold)** — done. The binary builds, runs, and greets you.
+- **M2 (parse + explain)** — done. `goblin explain` turns a standard 5-field
+  cron expression into plain English, with a normalized parser (`*`, `,`, `-`,
+  `/`, named months/days) and a `--json` mode.
+
+Next: `next` (M3), `lint` (M4), the TUI (M5), and English → cron (M6). See
 [`PLAN.md`](./PLAN.md) for the full roadmap and backlog.
 
 ## Install
@@ -45,10 +55,18 @@ Prebuilt binaries and `go install` arrive with M6. For now, build from source
 ```bash
 git clone https://github.com/rwrife/cron-goblin
 cd cron-goblin
-go run ./cmd/goblin            # greeting + version
-go run ./cmd/goblin --version  # cron-goblin 0.1.0-dev
-go run ./cmd/goblin --quiet    # no goblin grumbling on stderr
+go build -o goblin ./cmd/goblin
+
+./goblin explain "*/15 9-17 * * 1-5"
+# Every 15 minutes during the hours 09:00–17:00 on weekdays (Monday through Friday)
+
+./goblin explain --json "0 0 13 * 5"   # machine-readable summary for scripts/agents
+./goblin explain --quiet "30 6 * * 1-5" # no goblin grumbling on stderr
+./goblin --version                      # cron-goblin 0.1.0-dev
 ```
+
+Note: `explain` reports the next runs as a placeholder until the M3 fire-time
+engine lands.
 
 ## License
 
