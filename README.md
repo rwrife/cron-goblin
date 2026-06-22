@@ -22,12 +22,14 @@ every-minute loops, and expressions that never fire.
 
 ## What it does
 
-- **`goblin explain "<expr>"`** — plain-English description of a cron expression
-  (with `--json` for scripts/agents). ✅ *available now*
+- **`goblin explain "<expr>"`** — plain-English description of a cron expression,
+  now with a preview of the upcoming fire times (`--json` for scripts/agents).
+  ✅ *available now*
+- **`goblin next "<expr>" -n 20`** — the next N fire times in your timezone
+  (`--tz`, `--json`); reports expressions that never fire. ✅ *available now*
 
 Planned next:
 
-- **`goblin next "<expr>" -n 20`** — the next N fire times in your timezone.
 - **`goblin lint <crontab>`** — flags dead expressions, every-minute jobs, and
   same-minute collisions between jobs.
 - **`goblin from "every weekday at 6:30pm"`** — plain English → a cron expression.
@@ -43,8 +45,12 @@ Planned next:
 - **M2 (parse + explain)** — done. `goblin explain` turns a standard 5-field
   cron expression into plain English, with a normalized parser (`*`, `,`, `-`,
   `/`, named months/days) and a `--json` mode.
+- **M3 (next fire-time engine)** — done. `goblin next` lists the next N fire
+  times in any timezone (`--tz`), honoring cron's day-of-month/day-of-week
+  OR-rule and DST, and reporting expressions that never fire. `explain` now
+  shows real upcoming runs too.
 
-Next: `next` (M3), `lint` (M4), the TUI (M5), and English → cron (M6). See
+Next: `lint` (M4), the TUI (M5), and English → cron (M6). See
 [`PLAN.md`](./PLAN.md) for the full roadmap and backlog.
 
 ## Install
@@ -59,14 +65,22 @@ go build -o goblin ./cmd/goblin
 
 ./goblin explain "*/15 9-17 * * 1-5"
 # Every 15 minutes during the hours 09:00–17:00 on weekdays (Monday through Friday)
+# ...followed by the next few fire times.
+
+./goblin next "*/15 * * * *" -n 20             # next 20 fire times (local TZ, ISO)
+./goblin next --tz America/New_York "0 9 * * 1-5"  # 9am weekdays, New York time
+./goblin next --json "0 0 13 * 5"             # machine-readable: fires the 13th OR any Friday
+./goblin next "0 0 30 2 *"                    # "never fires" — February 30th doesn't exist
 
 ./goblin explain --json "0 0 13 * 5"   # machine-readable summary for scripts/agents
 ./goblin explain --quiet "30 6 * * 1-5" # no goblin grumbling on stderr
 ./goblin --version                      # cron-goblin 0.1.0-dev
 ```
 
-Note: `explain` reports the next runs as a placeholder until the M3 fire-time
-engine lands.
+Fire times honor cron's classic day-of-month/day-of-week OR-rule and are
+computed against your chosen timezone's wall clock, so daylight-saving
+transitions are handled correctly (missing hours are skipped; repeated hours
+fire once).
 
 ## License
 

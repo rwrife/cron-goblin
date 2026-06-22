@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 // runExplain builds a fresh explain command and captures its streams.
@@ -58,8 +59,8 @@ func TestExplainJSON(t *testing.T) {
 			Hour      []int `json:"hour"`
 			DayOfWeek []int `json:"day_of_week"`
 		} `json:"fields"`
-		NextRuns    []string `json:"next_runs"`
-		NextRunNote string   `json:"next_runs_note"`
+		NextRuns   []string `json:"next_runs"`
+		NeverFires bool     `json:"never_fires"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
 		t.Fatalf("output is not valid JSON: %v\n%s", err, stdout)
@@ -76,9 +77,16 @@ func TestExplainJSON(t *testing.T) {
 	if len(payload.Fields.DayOfWeek) != 5 {
 		t.Errorf("day_of_week = %v, want 5 entries", payload.Fields.DayOfWeek)
 	}
-	if len(payload.NextRuns) != 0 || payload.NextRunNote == "" {
-		t.Errorf("expected empty next_runs with a note, got runs=%v note=%q",
-			payload.NextRuns, payload.NextRunNote)
+	if payload.NeverFires {
+		t.Error("never_fires should be false for a live schedule")
+	}
+	if len(payload.NextRuns) != 5 {
+		t.Errorf("expected 5 next_runs by default, got %d: %v", len(payload.NextRuns), payload.NextRuns)
+	}
+	for _, r := range payload.NextRuns {
+		if _, perr := time.Parse(time.RFC3339, r); perr != nil {
+			t.Errorf("next_run %q is not RFC3339: %v", r, perr)
+		}
 	}
 }
 
