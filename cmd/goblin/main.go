@@ -1,8 +1,8 @@
 // Command goblin is the cron-goblin CLI: a grumpy gremlin that translates cron
 // gibberish into plain English, previews fire times, and lints your crontab.
 //
-// M1 shipped the scaffold; M2 added `explain`; M3 adds `next`. Further
-// subcommands (lint, from) arrive in later milestones — see PLAN.md.
+// M1 shipped the scaffold; M2 added `explain`; M3 added `next`; M4 adds
+// `lint`. Further subcommands (from) arrive in later milestones — see PLAN.md.
 package main
 
 import (
@@ -49,7 +49,7 @@ func newRootCmd(version string) *cobra.Command {
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "cron-goblin %s\n", version)
 			fmt.Fprintln(cmd.OutOrStdout(),
-				"Try `goblin explain \"*/15 9-17 * * 1-5\"`. See `goblin --help` and PLAN.md.")
+				"Try `goblin explain \"*/15 9-17 * * 1-5\"` or `goblin lint crontab.txt`. See `goblin --help` and PLAN.md.")
 			return nil
 		},
 		SilenceUsage:  true,
@@ -65,6 +65,7 @@ func newRootCmd(version string) *cobra.Command {
 	// Wire up subcommands.
 	cmd.AddCommand(newExplainCmd())
 	cmd.AddCommand(newNextCmd())
+	cmd.AddCommand(newLintCmd())
 
 	return cmd
 }

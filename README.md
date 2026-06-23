@@ -27,11 +27,12 @@ every-minute loops, and expressions that never fire.
   ✅ *available now*
 - **`goblin next "<expr>" -n 20`** — the next N fire times in your timezone
   (`--tz`, `--json`); reports expressions that never fire. ✅ *available now*
+- **`goblin lint <crontab>`** — reads a whole crontab (file or stdin) and flags
+  dead expressions, too-frequent jobs, and same-instant collisions between jobs
+  (`--json`, `--ci`). ✅ *available now*
 
 Planned next:
 
-- **`goblin lint <crontab>`** — flags dead expressions, every-minute jobs, and
-  same-minute collisions between jobs.
 - **`goblin from "every weekday at 6:30pm"`** — plain English → a cron expression.
 - **TUI mode** — live-edit a schedule and watch the next runs + a week heatmap
   update as you type.
@@ -49,8 +50,13 @@ Planned next:
   times in any timezone (`--tz`), honoring cron's day-of-month/day-of-week
   OR-rule and DST, and reporting expressions that never fire. `explain` now
   shows real upcoming runs too.
+- **M4 (lint + collision detection)** — done. `goblin lint` reads a crontab
+  (file or stdin) and runs pluggable rules: dead expressions (error),
+  too-frequent/every-minute jobs (warning), and same-instant collisions across
+  jobs (warning) — the "thundering herd" seed. `--json` for a stable report and
+  `--ci` for a non-zero exit in pipelines.
 
-Next: `lint` (M4), the TUI (M5), and English → cron (M6). See
+Next: the TUI (M5) and English → cron (M6). See
 [`PLAN.md`](./PLAN.md) for the full roadmap and backlog.
 
 ## Install
@@ -74,6 +80,11 @@ go build -o goblin ./cmd/goblin
 
 ./goblin explain --json "0 0 13 * 5"   # machine-readable summary for scripts/agents
 ./goblin explain --quiet "30 6 * * 1-5" # no goblin grumbling on stderr
+
+./goblin lint /etc/crontab              # lint a crontab file
+crontab -l | ./goblin lint -            # lint your own crontab via stdin
+./goblin lint --json crontab.txt        # stable JSON report for scripts/agents
+./goblin lint --ci crontab.txt          # non-zero exit if any warning/error
 ./goblin --version                      # cron-goblin 0.1.0-dev
 ```
 
