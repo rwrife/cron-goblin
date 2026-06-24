@@ -30,13 +30,16 @@ every-minute loops, and expressions that never fire.
 - **`goblin lint <crontab>`** — reads a whole crontab (file or stdin) and flags
   dead expressions, too-frequent jobs, and same-instant collisions between jobs
   (`--json`, `--ci`). ✅ *available now*
+- **`goblin` (live TUI)** — run with no arguments in a terminal to open a live
+  preview: type a cron expression and watch the plain English, the next fire
+  times, and a week-view heatmap update on every keystroke, with inline lint
+  warnings. ✅ *available now*
 
 Planned next:
 
 - **`goblin from "every weekday at 6:30pm"`** — plain English → a cron expression.
-- **TUI mode** — live-edit a schedule and watch the next runs + a week heatmap
-  update as you type.
-- **`--json`** on everything — so your scripts (and AI agents) can call it safely.
+- **`--quiet` / `--no-color` everywhere, shell completions, `goblin doctor`,
+  and prebuilt release binaries** — the M6 polish pass.
 
 ## Status
 
@@ -55,19 +58,34 @@ Planned next:
   too-frequent/every-minute jobs (warning), and same-instant collisions across
   jobs (warning) — the "thundering herd" seed. `--json` for a stable report and
   `--ci` for a non-zero exit in pipelines.
+- **M5 (TUI preview pane)** — done. Running `goblin` with no arguments in a
+  terminal opens a live [bubbletea](https://github.com/charmbracelet/bubbletea)
+  preview: an input box parses your expression as you type and three panels
+  update in real time — the plain-English description, the next fire times (with
+  a relative "in 3h 20m" hint), and a week×hour heatmap of fire density. Invalid
+  input shows a gentle error instead of crashing, never-firing expressions say
+  so, and dead/too-frequent schedules surface inline goblin warnings. Use
+  `--tz`, `--no-color`, or `--no-tui` (and piping/redirecting keeps the old
+  text greeting for scripts).
 
-Next: the TUI (M5) and English → cron (M6). See
+Next: English → cron and release polish (M6). See
 [`PLAN.md`](./PLAN.md) for the full roadmap and backlog.
 
 ## Install
 
 Prebuilt binaries and `go install` arrive with M6. For now, build from source
-(Go 1.22+):
+(Go 1.24+):
 
 ```bash
 git clone https://github.com/rwrife/cron-goblin
 cd cron-goblin
 go build -o goblin ./cmd/goblin
+
+./goblin                                # live TUI preview (in a terminal): type an
+                                        # expression, watch next runs + heatmap update
+./goblin "0 9 * * 1-5"                  # open the TUI pre-filled with an expression
+./goblin --tz America/New_York          # TUI with fire times in New York
+./goblin --no-color                     # TUI without ANSI color
 
 ./goblin explain "*/15 9-17 * * 1-5"
 # Every 15 minutes during the hours 09:00–17:00 on weekdays (Monday through Friday)
