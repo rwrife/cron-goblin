@@ -30,6 +30,9 @@ every-minute loops, and expressions that never fire.
 - **`goblin lint <crontab>`** — reads a whole crontab (file or stdin) and flags
   dead expressions, too-frequent jobs, and same-instant collisions between jobs
   (`--json`, `--ci`). ✅ *available now*
+- **`goblin from "every weekday at 6:30pm"`** — plain English → a cron
+  expression. Deterministic and fully offline (a hand-rolled rule grammar, no
+  LLM, no network); `--json` for agents. ✅ *available now*
 - **`goblin` (live TUI)** — run with no arguments in a terminal to open a live
   preview: type a cron expression and watch the plain English, the next fire
   times, and a week-view heatmap update on every keystroke, with inline lint
@@ -37,9 +40,8 @@ every-minute loops, and expressions that never fire.
 
 Planned next:
 
-- **`goblin from "every weekday at 6:30pm"`** — plain English → a cron expression.
-- **`--quiet` / `--no-color` everywhere, shell completions, `goblin doctor`,
-  and prebuilt release binaries** — the M6 polish pass.
+- **`--no-color` everywhere, shell completions, `goblin doctor`,
+  and prebuilt release binaries** — the remaining M6 polish pass.
 
 ## Status
 
@@ -67,8 +69,17 @@ Planned next:
   so, and dead/too-frequent schedules surface inline goblin warnings. Use
   `--tz`, `--no-color`, or `--no-tui` (and piping/redirecting keeps the old
   text greeting for scripts).
+- **M6 (English → cron + polish)** — in progress. `goblin from "<phrase>"`
+  turns plain English into a 5-field cron expression with a small, deterministic,
+  fully offline rule grammar (no LLM, no network). It covers the common cases
+  — "every 15 minutes", "every day at 9am", "every weekday at 6:30pm",
+  "weekends at noon", "every monday at 8am", "first of the month at 9am",
+  "every january at midnight" — prints the cron line first (so it pipes), echoes
+  a plain-English readback plus the next fire, and rejects anything outside the
+  grammar rather than guessing. `--json` for agents. Shell completions,
+  `goblin doctor`, and release binaries are the remaining M6 work.
 
-Next: English → cron and release polish (M6). See
+Next: finish the M6 polish (completions, `goblin doctor`, `goreleaser`). See
 [`PLAN.md`](./PLAN.md) for the full roadmap and backlog.
 
 ## Install
@@ -98,6 +109,11 @@ go build -o goblin ./cmd/goblin
 
 ./goblin explain --json "0 0 13 * 5"   # machine-readable summary for scripts/agents
 ./goblin explain --quiet "30 6 * * 1-5" # no goblin grumbling on stderr
+
+./goblin from "every 15 minutes"        # -> */15 * * * *  (English -> cron)
+./goblin from "every weekday at 6:30pm" # -> 30 18 * * 1-5
+./goblin from --json "daily at 9am"     # machine-readable result for agents
+./goblin from "every blue moon"         # honest error instead of a wrong guess
 
 ./goblin lint /etc/crontab              # lint a crontab file
 crontab -l | ./goblin lint -            # lint your own crontab via stdin
