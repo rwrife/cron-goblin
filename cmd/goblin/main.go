@@ -3,8 +3,8 @@
 //
 // M1 shipped the scaffold; M2 added `explain`; M3 added `next`; M4 adds
 // `lint`; M5 adds the live TUI preview (launched when `goblin` is run with no
-// subcommand on a terminal). Further subcommands (from) arrive in later
-// milestones — see PLAN.md.
+// subcommand on a terminal); M6 adds `from` (English -> cron). Further polish
+// (completions, `goblin doctor`, release tooling) is tracked in PLAN.md.
 package main
 
 import (
@@ -106,6 +106,7 @@ func newRootCmd(version string) *cobra.Command {
 	cmd.AddCommand(newExplainCmd())
 	cmd.AddCommand(newNextCmd())
 	cmd.AddCommand(newLintCmd())
+	cmd.AddCommand(newFromCmd())
 
 	return cmd
 }
