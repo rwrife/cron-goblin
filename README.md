@@ -37,6 +37,9 @@ every-minute loops, and expressions that never fire.
   via `crontab -l` and runs the same rules as `goblin lint` (`--json`, `--ci`,
   `--user`). A user with no crontab is reported calmly and exits zero.
   ✅ *available now*
+- **`goblin completion <shell>`** — generate a tab-completion script for bash,
+  zsh, fish, or PowerShell. Each subcommand's `--help` has the exact install
+  line. ✅ *available now*
 - **`goblin` (live TUI)** — run with no arguments in a terminal to open a live
   preview: type a cron expression and watch the plain English, the next fire
   times, and a week-view heatmap update on every keystroke, with inline lint
@@ -44,8 +47,8 @@ every-minute loops, and expressions that never fire.
 
 Planned next:
 
-- **`--no-color` everywhere, shell completions, and prebuilt release
-  binaries** — the remaining M6 polish pass.
+- **Prebuilt release binaries** (`goreleaser` + `go install`) — the remaining
+  M6 polish pass.
 
 ## Status
 
@@ -81,10 +84,11 @@ Planned next:
   "every january at midnight" — prints the cron line first (so it pipes), echoes
   a plain-English readback plus the next fire, and rejects anything outside the
   grammar rather than guessing. `--json` for agents. `goblin doctor` now lints
-  your installed crontab (`crontab -l`) with the same engine. Shell completions
-  and release binaries are the remaining M6 work.
+  your installed crontab (`crontab -l`) with the same engine, and
+  `goblin completion <shell>` emits tab-completion scripts for bash/zsh/fish/
+  PowerShell. Prebuilt release binaries are the remaining M6 work.
 
-Next: finish the M6 polish (completions, `goreleaser`). See
+Next: finish the M6 polish (`goreleaser` release binaries). See
 [`PLAN.md`](./PLAN.md) for the full roadmap and backlog.
 
 ## Install
@@ -128,6 +132,12 @@ crontab -l | ./goblin lint -            # lint your own crontab via stdin
 ./goblin doctor                         # lint the crontab you actually have installed
 ./goblin doctor --json                  # stable JSON report for scripts/agents
 ./goblin doctor --ci                    # non-zero exit if any warning/error
+
+./goblin completion bash > /etc/bash_completion.d/goblin   # bash tab-completion
+./goblin completion zsh  > "${fpath[1]}/_goblin"           # zsh
+./goblin completion fish > ~/.config/fish/completions/goblin.fish  # fish
+./goblin completion powershell | Out-String | Invoke-Expression   # PowerShell
+./goblin completion bash --help         # exact per-shell install instructions
 ./goblin --version                      # cron-goblin 0.1.0-dev
 ```
 

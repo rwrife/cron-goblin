@@ -3,9 +3,9 @@
 //
 // M1 shipped the scaffold; M2 added `explain`; M3 added `next`; M4 adds
 // `lint`; M5 adds the live TUI preview (launched when `goblin` is run with no
-// subcommand on a terminal); M6 adds `from` (English -> cron) and `doctor`
-// (lint the current user's crontab). Remaining polish (shell completions,
-// release tooling) is tracked in PLAN.md.
+// subcommand on a terminal); M6 adds `from` (English -> cron), `doctor` (lint
+// the current user's crontab), and `completion` (shell completion scripts).
+// Remaining polish (release tooling) is tracked in PLAN.md.
 package main
 
 import (
@@ -103,12 +103,18 @@ func newRootCmd(version string) *cobra.Command {
 	// Friendlier `--version` output than cobra's default "goblin version X".
 	cmd.SetVersionTemplate("cron-goblin {{.Version}}\n")
 
+	// Replace cobra's auto-generated `completion` command with our own
+	// goblin-flavored one (see completion.go). Disabling the default here lets
+	// us own the help text and install docs without a duplicate command.
+	cmd.CompletionOptions.DisableDefaultCmd = true
+
 	// Wire up subcommands.
 	cmd.AddCommand(newExplainCmd())
 	cmd.AddCommand(newNextCmd())
 	cmd.AddCommand(newLintCmd())
 	cmd.AddCommand(newFromCmd())
 	cmd.AddCommand(newDoctorCmd())
+	cmd.AddCommand(newCompletionCmd(cmd))
 
 	return cmd
 }
