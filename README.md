@@ -33,6 +33,10 @@ every-minute loops, and expressions that never fire.
 - **`goblin from "every weekday at 6:30pm"`** — plain English → a cron
   expression. Deterministic and fully offline (a hand-rolled rule grammar, no
   LLM, no network); `--json` for agents. ✅ *available now*
+- **`goblin doctor`** — lint the crontab you actually have installed: reads it
+  via `crontab -l` and runs the same rules as `goblin lint` (`--json`, `--ci`,
+  `--user`). A user with no crontab is reported calmly and exits zero.
+  ✅ *available now*
 - **`goblin` (live TUI)** — run with no arguments in a terminal to open a live
   preview: type a cron expression and watch the plain English, the next fire
   times, and a week-view heatmap update on every keystroke, with inline lint
@@ -40,8 +44,8 @@ every-minute loops, and expressions that never fire.
 
 Planned next:
 
-- **`--no-color` everywhere, shell completions, `goblin doctor`,
-  and prebuilt release binaries** — the remaining M6 polish pass.
+- **`--no-color` everywhere, shell completions, and prebuilt release
+  binaries** — the remaining M6 polish pass.
 
 ## Status
 
@@ -76,10 +80,11 @@ Planned next:
   "weekends at noon", "every monday at 8am", "first of the month at 9am",
   "every january at midnight" — prints the cron line first (so it pipes), echoes
   a plain-English readback plus the next fire, and rejects anything outside the
-  grammar rather than guessing. `--json` for agents. Shell completions,
-  `goblin doctor`, and release binaries are the remaining M6 work.
+  grammar rather than guessing. `--json` for agents. `goblin doctor` now lints
+  your installed crontab (`crontab -l`) with the same engine. Shell completions
+  and release binaries are the remaining M6 work.
 
-Next: finish the M6 polish (completions, `goblin doctor`, `goreleaser`). See
+Next: finish the M6 polish (completions, `goreleaser`). See
 [`PLAN.md`](./PLAN.md) for the full roadmap and backlog.
 
 ## Install
@@ -119,6 +124,10 @@ go build -o goblin ./cmd/goblin
 crontab -l | ./goblin lint -            # lint your own crontab via stdin
 ./goblin lint --json crontab.txt        # stable JSON report for scripts/agents
 ./goblin lint --ci crontab.txt          # non-zero exit if any warning/error
+
+./goblin doctor                         # lint the crontab you actually have installed
+./goblin doctor --json                  # stable JSON report for scripts/agents
+./goblin doctor --ci                    # non-zero exit if any warning/error
 ./goblin --version                      # cron-goblin 0.1.0-dev
 ```
 
