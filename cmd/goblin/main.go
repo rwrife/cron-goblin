@@ -4,8 +4,9 @@
 // M1 shipped the scaffold; M2 added `explain`; M3 added `next`; M4 adds
 // `lint`; M5 adds the live TUI preview (launched when `goblin` is run with no
 // subcommand on a terminal); M6 adds `from` (English -> cron), `doctor` (lint
-// the current user's crontab), and `completion` (shell completion scripts).
-// Remaining polish (release tooling) is tracked in PLAN.md.
+// the current user's crontab), `completion` (shell completion scripts), and
+// the goreleaser release pipeline that ships prebuilt binaries (the version is
+// stamped into main.version at release time). See PLAN.md for the roadmap.
 package main
 
 import (
