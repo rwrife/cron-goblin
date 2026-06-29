@@ -22,6 +22,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/rwrife/cron-goblin/internal/parse"
 )
@@ -94,12 +95,24 @@ type Rule interface {
 // DefaultRules is the rule set run by Lint when no custom set is supplied. New
 // rules are added here (and in their own rule_*.go file). Order is cosmetic;
 // findings are sorted before reporting.
+//
+// This timezone-agnostic set excludes the DST-danger rule, which only has
+// meaning relative to a specific zone; see DefaultRulesTZ.
 func DefaultRules() []Rule {
 	return []Rule{
 		deadExpressionRule{},
 		tooFrequentRule{minMinutes: defaultMinInterval},
 		collisionRule{},
 	}
+}
+
+// DefaultRulesTZ is DefaultRules plus the DST-danger rule bound to loc, using
+// `now` to pick which years' transitions to examine. When loc is nil or UTC the
+// DST rule contributes nothing, so the result is equivalent to DefaultRules.
+// LintWithLocation uses this to make `goblin lint --tz` zone-aware while the
+// plain Lint entrypoint stays UTC-only and unchanged.
+func DefaultRulesTZ(loc *time.Location, now time.Time) []Rule {
+	return append(DefaultRules(), newDSTDangerRule(loc, now))
 }
 
 // Report is the aggregate result of linting a crontab: every Finding, plus the
@@ -146,6 +159,22 @@ func (r Report) Counts() (info, warning, errors int) {
 // synthesized "parse-error" Finding so the user is told their crontab has a
 // malformed line (rather than that line silently vanishing).
 func Lint(r io.Reader, rules []Rule) (Report, error) {
+	return lintWith(r, rules)
+}
+
+// LintWithLocation is Lint with DST-awareness: it runs DefaultRulesTZ(loc, now)
+// so the DST-danger rule can flag schedules that fall in a daylight-saving
+// transition window for loc. A nil or UTC loc makes it behave exactly like
+// Lint with default rules (no DST findings). It is the entrypoint `goblin lint
+// --tz` uses.
+func LintWithLocation(r io.Reader, loc *time.Location, now time.Time) (Report, error) {
+	return lintWith(r, DefaultRulesTZ(loc, now))
+}
+
+// lintWith is the shared core behind Lint and LintWithLocation: parse the
+// crontab, surface malformed lines, run the rules, and sort. Lint delegates
+// here after defaulting its rule set.
+func lintWith(r io.Reader, rules []Rule) (Report, error) {
 	entries, err := ParseCrontab(r)
 	if err != nil {
 		return Report{}, err
@@ -155,8 +184,6 @@ func Lint(r io.Reader, rules []Rule) (Report, error) {
 	}
 
 	var findings []Finding
-
-	// Surface malformed lines first: a line we can't parse is itself a defect.
 	for _, e := range entries {
 		if e.ParseErr != nil {
 			findings = append(findings, Finding{
@@ -167,11 +194,9 @@ func Lint(r io.Reader, rules []Rule) (Report, error) {
 			})
 		}
 	}
-
 	for _, rule := range rules {
 		findings = append(findings, rule.Check(entries)...)
 	}
-
 	sortFindings(findings)
 
 	scheduled := 0
@@ -180,7 +205,6 @@ func Lint(r io.Reader, rules []Rule) (Report, error) {
 			scheduled++
 		}
 	}
-
 	return Report{Findings: findings, Entries: scheduled}, nil
 }
 

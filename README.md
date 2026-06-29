@@ -28,8 +28,9 @@ every-minute loops, and expressions that never fire.
 - **`goblin next "<expr>" -n 20`** — the next N fire times in your timezone
   (`--tz`, `--json`); reports expressions that never fire. ✅ *available now*
 - **`goblin lint <crontab>`** — reads a whole crontab (file or stdin) and flags
-  dead expressions, too-frequent jobs, and same-instant collisions between jobs
-  (`--json`, `--ci`). ✅ *available now*
+  dead expressions, too-frequent jobs, same-instant collisions between jobs, and
+  (with `--tz`) schedules that land in a daylight-saving gap/overlap
+  (`--tz`, `--json`, `--ci`). ✅ *available now*
 - **`goblin from "every weekday at 6:30pm"`** — plain English → a cron
   expression. Deterministic and fully offline (a hand-rolled rule grammar, no
   LLM, no network); `--json` for agents. ✅ *available now*
@@ -63,8 +64,11 @@ Prebuilt binaries for Linux, macOS, and Windows ship on every tagged release
 - **M4 (lint + collision detection)** — done. `goblin lint` reads a crontab
   (file or stdin) and runs pluggable rules: dead expressions (error),
   too-frequent/every-minute jobs (warning), and same-instant collisions across
-  jobs (warning) — the "thundering herd" seed. `--json` for a stable report and
-  `--ci` for a non-zero exit in pipelines.
+  jobs (warning) — the "thundering herd" seed. With `--tz` it also runs the
+  **DST-danger** rule (from the v0.2 backlog): jobs whose wall-clock time falls
+  in a spring-forward gap are flagged as silently skipped (warning), and jobs in
+  a fall-back overlap are noted as ambiguous (info). `--json` for a stable report
+  and `--ci` for a non-zero exit in pipelines.
 - **M5 (TUI preview pane)** — done. Running `goblin` with no arguments in a
   terminal opens a live [bubbletea](https://github.com/charmbracelet/bubbletea)
   preview: an input box parses your expression as you type and three panels
@@ -89,8 +93,9 @@ Prebuilt binaries for Linux, macOS, and Windows ship on every tagged release
   tagged release — the release tag is stamped into `goblin --version`.
 
 That's the v0.1 milestone arc complete. See
-[`PLAN.md`](./PLAN.md) for the roadmap and the v0.2+ backlog (DST danger
-report, dialect translation, `goblin diff`, and more).
+[`PLAN.md`](./PLAN.md) for the roadmap and the v0.2+ backlog (the DST danger
+report has since landed in `goblin lint --tz`; dialect translation,
+`goblin diff`, and more remain).
 
 ## Install
 
@@ -163,6 +168,7 @@ go build -o goblin ./cmd/goblin
 ./goblin lint /etc/crontab              # lint a crontab file
 crontab -l | ./goblin lint -            # lint your own crontab via stdin
 ./goblin lint --json crontab.txt        # stable JSON report for scripts/agents
+./goblin lint --tz America/New_York crontab.txt   # also flag DST gap/overlap hazards
 ./goblin lint --ci crontab.txt          # non-zero exit if any warning/error
 
 ./goblin doctor                         # lint the crontab you actually have installed
