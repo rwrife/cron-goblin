@@ -45,10 +45,8 @@ every-minute loops, and expressions that never fire.
   times, and a week-view heatmap update on every keystroke, with inline lint
   warnings. ✅ *available now*
 
-Planned next:
-
-- **Prebuilt release binaries** (`goreleaser` + `go install`) — the remaining
-  M6 polish pass.
+Prebuilt binaries for Linux, macOS, and Windows ship on every tagged release
+(plus `go install` from source) — see [Install](#install).
 
 ## Status
 
@@ -76,7 +74,7 @@ Planned next:
   so, and dead/too-frequent schedules surface inline goblin warnings. Use
   `--tz`, `--no-color`, or `--no-tui` (and piping/redirecting keeps the old
   text greeting for scripts).
-- **M6 (English → cron + polish)** — in progress. `goblin from "<phrase>"`
+- **M6 (English → cron + polish)** — done. `goblin from "<phrase>"`
   turns plain English into a 5-field cron expression with a small, deterministic,
   fully offline rule grammar (no LLM, no network). It covers the common cases
   — "every 15 minutes", "every day at 9am", "every weekday at 6:30pm",
@@ -84,17 +82,55 @@ Planned next:
   "every january at midnight" — prints the cron line first (so it pipes), echoes
   a plain-English readback plus the next fire, and rejects anything outside the
   grammar rather than guessing. `--json` for agents. `goblin doctor` now lints
-  your installed crontab (`crontab -l`) with the same engine, and
+  your installed crontab (`crontab -l`) with the same engine,
   `goblin completion <shell>` emits tab-completion scripts for bash/zsh/fish/
-  PowerShell. Prebuilt release binaries are the remaining M6 work.
+  PowerShell, and a [goreleaser](https://goreleaser.com) pipeline ships
+  prebuilt binaries (Linux/macOS/Windows, amd64 + arm64) and checksums on every
+  tagged release — the release tag is stamped into `goblin --version`.
 
-Next: finish the M6 polish (`goreleaser` release binaries). See
-[`PLAN.md`](./PLAN.md) for the full roadmap and backlog.
+That's the v0.1 milestone arc complete. See
+[`PLAN.md`](./PLAN.md) for the roadmap and the v0.2+ backlog (DST danger
+report, dialect translation, `goblin diff`, and more).
 
 ## Install
 
-Prebuilt binaries and `go install` arrive with M6. For now, build from source
-(Go 1.24+):
+Three ways to get the `goblin` binary, easiest first.
+
+### Prebuilt binary (recommended)
+
+Grab a release archive for your platform from the
+[**Releases**](https://github.com/rwrife/cron-goblin/releases) page
+(Linux, macOS, and Windows; both `amd64` and `arm64`), unpack it, and put
+`goblin` on your `PATH`. Every archive is listed in `checksums.txt` (SHA-256)
+so you can verify the download.
+
+```bash
+# Linux/macOS example (swap in the version + your os/arch):
+VERSION=v0.1.0
+OS=linux            # or: darwin
+ARCH=amd64          # or: arm64
+curl -sSL "https://github.com/rwrife/cron-goblin/releases/download/${VERSION}/cron-goblin_${VERSION}_${OS}_${ARCH}.tar.gz" \
+  | tar -xz goblin
+sudo install goblin /usr/local/bin/goblin
+goblin --version    # cron-goblin v0.1.0
+```
+
+Windows archives are `.zip`; extract `goblin.exe` and drop it somewhere on your
+`PATH`.
+
+### `go install`
+
+If you have a Go 1.24+ toolchain:
+
+```bash
+go install github.com/rwrife/cron-goblin/cmd/goblin@latest
+# installs `goblin` into $(go env GOPATH)/bin
+```
+
+(`@latest` tracks the newest tag; pin a specific one with `@v0.1.0`. Binaries
+built this way report the module version, or `(devel)` for an untagged build.)
+
+### Build from source
 
 ```bash
 git clone https://github.com/rwrife/cron-goblin
