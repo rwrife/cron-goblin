@@ -171,3 +171,81 @@ func TestLintPersonaOnStderrByDefault(t *testing.T) {
 		t.Error("persona leaked into stdout")
 	}
 }
+
+// dstCrontab pins a job in the US spring-forward gap (02:30) and one in the
+// fall-back overlap (01:30), plus a job that is safe in either direction.
+const dstCrontab = "30 2 * * * /backup\n30 1 * * * /report\n0 4 * * * /safe\n"
+
+func TestLintTZFlagsDSTHazards(t *testing.T) {
+	path := writeTempCrontab(t, dstCrontab)
+	stdout, _, err := runLint(t, "", "--quiet", "--tz", "America/New_York", path)
+	if err != nil {
+		t.Fatalf("Execute() error: %v", err)
+	}
+	if !strings.Contains(stdout, "spring-forward gap") {
+		t.Errorf("expected a spring-forward gap warning, got:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "fall-back overlap") {
+		t.Errorf("expected a fall-back overlap note, got:\n%s", stdout)
+	}
+}
+
+func TestLintWithoutTZSkipsDST(t *testing.T) {
+	// Same hazardous crontab, but no --tz: DST analysis is off, so the file
+	// reads as clean (no DST language at all).
+	path := writeTempCrontab(t, dstCrontab)
+	stdout, _, err := runLint(t, "", "--quiet", path)
+	if err != nil {
+		t.Fatalf("Execute() error: %v", err)
+	}
+	if strings.Contains(stdout, "dst-danger") || strings.Contains(stdout, "spring-forward") ||
+		strings.Contains(stdout, "fall-back") {
+		t.Errorf("DST findings should not appear without --tz, got:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "No problems found") {
+		t.Errorf("hazardous-but-untimed crontab should read clean, got:\n%s", stdout)
+	}
+}
+
+func TestLintTZAppearsInJSON(t *testing.T) {
+	path := writeTempCrontab(t, dstCrontab)
+	stdout, _, err := runLint(t, "", "--quiet", "--json", "--tz", "America/New_York", path)
+	if err != nil {
+		t.Fatalf("Execute() error: %v", err)
+	}
+	var payload struct {
+		Findings []struct {
+			Rule     string `json:"rule"`
+			Severity string `json:"severity"`
+		} `json:"findings"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, stdout)
+	}
+	var sawWarn, sawInfo bool
+	for _, f := range payload.Findings {
+		if f.Rule != "dst-danger" {
+			continue
+		}
+		switch f.Severity {
+		case "warning":
+			sawWarn = true
+		case "info":
+			sawInfo = true
+		}
+	}
+	if !sawWarn || !sawInfo {
+		t.Errorf("expected both a warning (gap) and info (overlap) dst-danger finding; warn=%v info=%v", sawWarn, sawInfo)
+	}
+}
+
+func TestLintBadTZFailsFast(t *testing.T) {
+	path := writeTempCrontab(t, dstCrontab)
+	_, stderr, err := runLint(t, "", "--quiet", "--tz", "Mars/Olympus", path)
+	if err == nil {
+		t.Fatal("an unknown timezone should fail")
+	}
+	if !strings.Contains(stderr, "unknown timezone") {
+		t.Errorf("expected an unknown-timezone error on stderr, got: %q", stderr)
+	}
+}

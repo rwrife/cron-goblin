@@ -67,7 +67,7 @@ func computePreview(expr string, now time.Time, loc *time.Location) preview {
 	p.Runs = nextrun.NextN(sched, now, previewRuns, loc)
 	p.Never = len(p.Runs) == 0
 	p.Grid = render.BuildHeatGrid(p.Runs, loc)
-	p.Warnings = lint.Messages(lint.CheckSchedule(sched))
+	p.Warnings = lint.Messages(lint.CheckScheduleTZ(sched, loc, now))
 	return p
 }
 

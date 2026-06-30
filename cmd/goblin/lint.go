@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/rwrife/cron-goblin/internal/goblin"
 	"github.com/rwrife/cron-goblin/internal/lint"
@@ -49,27 +50,48 @@ func newLintCmd() *cobra.Command {
 		asJSON bool
 		ci     bool
 		quiet  bool
+		tz     string
 	)
 
 	cmd := &cobra.Command{
 		Use:   "lint [crontab-file]",
-		Short: "Lint a crontab: dead expressions, too-frequent jobs, collisions",
+		Short: "Lint a crontab: dead expressions, too-frequent jobs, collisions, DST hazards",
 		Long: "Read a crontab (a file path, or stdin when omitted or '-') and check it\n" +
 			"like a linter checks code. Rules:\n\n" +
 			"  • dead-expression — schedules that can never fire (error)\n" +
 			"  • too-frequent    — every-minute / runaway cadences (warning)\n" +
-			"  • collision       — jobs that fire at the same instant (warning)\n\n" +
+			"  • collision       — jobs that fire at the same instant (warning)\n" +
+			"  • dst-danger      — jobs landing in a daylight-saving gap/overlap\n" +
+			"                      (needs --tz; warning when skipped, info when ambiguous)\n\n" +
 			"Use --json for a stable machine-readable report, and --ci to exit\n" +
 			"non-zero when any warning or error is found (handy in pipelines).",
 		Example: "  goblin lint /etc/crontab\n" +
 			"  crontab -l | goblin lint -\n" +
 			"  goblin lint --json crontab.txt\n" +
+			"  goblin lint --tz America/New_York crontab.txt   # flag DST hazards\n" +
 			"  goblin lint --ci crontab.txt   # non-zero exit on warnings/errors",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := ""
 			if len(args) == 1 {
 				path = args[0]
+			}
+
+			// Resolve the timezone up front so a bad --tz fails fast with the
+			// same goblin grumble as the other zone-aware commands. An empty
+			// --tz means "no DST analysis" (local would be ambiguous for a file
+			// that may target another host), keeping default output unchanged.
+			var loc *time.Location
+			if tz != "" {
+				l, err := loadLocation(tz)
+				if err != nil {
+					if !quiet {
+						fmt.Fprintln(cmd.ErrOrStderr(), goblin.Line(tz))
+					}
+					fmt.Fprintf(cmd.ErrOrStderr(), "error: unknown timezone %q: %v\n", tz, err)
+					return err
+				}
+				loc = l
 			}
 
 			src, reader, closer, err := openCrontab(cmd, path)
@@ -84,7 +106,14 @@ func newLintCmd() *cobra.Command {
 				defer closer.Close()
 			}
 
-			report, err := lint.Lint(reader, nil)
+			// With a timezone, run the DST-aware path; otherwise the plain
+			// default-rule lint (UTC, no DST findings) for backward compatibility.
+			var report lint.Report
+			if loc != nil {
+				report, err = lint.LintWithLocation(reader, loc, time.Now())
+			} else {
+				report, err = lint.Lint(reader, nil)
+			}
 			if err != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "error: reading crontab: %v\n", err)
 				return err
@@ -116,6 +145,8 @@ func newLintCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit a stable machine-readable JSON report")
 	cmd.Flags().BoolVar(&ci, "ci", false, "exit non-zero when any warning or error is found")
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "silence the goblin's grumbling (stderr persona)")
+	cmd.Flags().StringVar(&tz, "tz", "",
+		"timezone for DST-hazard analysis (IANA name, e.g. America/New_York; off when unset)")
 
 	return cmd
 }
