@@ -6,7 +6,9 @@
 // subcommand on a terminal); M6 adds `from` (English -> cron), `doctor` (lint
 // the current user's crontab), `completion` (shell completion scripts), and
 // the goreleaser release pipeline that ships prebuilt binaries (the version is
-// stamped into main.version at release time). See PLAN.md for the roadmap.
+// stamped into main.version at release time). `stagger` spreads "thundering
+// herd" pile-ups (jobs sharing a minute) across a window. See PLAN.md for the
+// roadmap.
 package main
 
 import (
@@ -113,6 +115,7 @@ func newRootCmd(version string) *cobra.Command {
 	cmd.AddCommand(newExplainCmd())
 	cmd.AddCommand(newNextCmd())
 	cmd.AddCommand(newLintCmd())
+	cmd.AddCommand(newStaggerCmd())
 	cmd.AddCommand(newFromCmd())
 	cmd.AddCommand(newDoctorCmd())
 	cmd.AddCommand(newCompletionCmd(cmd))
