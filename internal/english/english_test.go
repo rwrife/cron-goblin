@@ -61,6 +61,47 @@ func TestParseGolden(t *testing.T) {
 		// Months.
 		{"every january at midnight", "0 0 1 1 *"},
 		{"every december at noon", "0 12 1 12 *"},
+
+		// Named times-of-day (conventions locked here).
+		{"every morning", "0 6 * * *"},
+		{"every night", "0 21 * * *"},
+		{"every evening", "0 18 * * *"},
+		{"every afternoon", "0 12 * * *"},
+		{"in the morning", "0 6 * * *"},
+		{"at night", "0 21 * * *"},
+		{"every weekday morning", "0 6 * * 1-5"},
+		{"every weekday evening", "0 18 * * 1-5"},
+		{"weekends at night", "0 21 * * 0,6"},
+		{"every monday morning", "0 6 * * 1"},
+
+		// Count-per-period.
+		{"once a day", "0 0 * * *"},
+		{"twice a day", "0 0,12 * * *"},
+		{"three times a day", "0 0,8,16 * * *"},
+		{"4 times a day", "0 0,6,12,18 * * *"},
+		{"once an hour", "0 * * * *"},
+		{"twice an hour", "0,30 * * * *"},
+
+		// Multi-day / multi-month intervals.
+		{"every 3 days", "0 0 */3 * *"},
+		{"every other day", "0 0 */2 * *"},
+		{"every 1 day", "0 0 * * *"},
+		{"every other month", "0 0 1 */2 *"},
+		{"every 3 months", "0 0 1 */3 *"},
+		{"every other hour", "0 */2 * * *"},
+
+		// Calendar cadences.
+		{"quarterly", "0 0 1 1,4,7,10 *"},
+		{"every quarter", "0 0 1 1,4,7,10 *"},
+		{"yearly", "0 0 1 1 *"},
+		{"annually", "0 0 1 1 *"},
+		{"every year", "0 0 1 1 *"},
+
+		// Lists of times (shared minute).
+		{"every day at 9am and 5pm", "0 9,17 * * *"},
+		{"at 9am and 5pm", "0 9,17 * * *"},
+		{"every day at 9am, noon and 5pm", "0 9,12,17 * * *"},
+		{"weekdays at 8am and 6pm", "0 8,18 * * 1-5"},
 	}
 
 	for _, tc := range cases {
@@ -87,6 +128,10 @@ func TestParseProducesValidCron(t *testing.T) {
 		"every tuesday and thursday at 5pm", "first of the month at 9am",
 		"on the 15th at noon", "every january at midnight", "at midnight",
 		"monthly at 9am", "mon, wed and fri at 7am",
+		"every morning", "every weekday evening", "weekends at night",
+		"once a day", "twice a day", "once an hour", "twice an hour",
+		"every 3 days", "every other day", "every 3 months", "every other month",
+		"quarterly", "yearly", "every day at 9am and 5pm",
 	}
 	for _, p := range phrases {
 		expr, err := Parse(p)
@@ -126,19 +171,26 @@ func TestParseCaseAndWhitespaceInsensitive(t *testing.T) {
 // rather than guessing.
 func TestParseErrors(t *testing.T) {
 	bad := []string{
-		"",                         // empty
-		"   ",                      // whitespace only
-		"every blue moon",          // gibberish recurrence
-		"at 25:00",                 // bad hour
-		"at 9:99am",                // bad minute
-		"at 13am",                  // invalid 12-hour
-		"every 5 minutes at 9am",   // sub-hour + fixed time conflict
-		"every hour at 9am",        // hourly + fixed time conflict
-		"every 90 minutes",         // exceeds 59
-		"every 30 hours",           // exceeds 23
-		"last of the month at 9am", // cron can't express "last"
-		"on the 40th at noon",      // out-of-range day
-		"flibbertigibbet",          // pure nonsense
+		"",                               // empty
+		"   ",                            // whitespace only
+		"every blue moon",                // gibberish recurrence
+		"at 25:00",                       // bad hour
+		"at 9:99am",                      // bad minute
+		"at 13am",                        // invalid 12-hour
+		"every 5 minutes at 9am",         // sub-hour + fixed time conflict
+		"every hour at 9am",              // hourly + fixed time conflict
+		"every 90 minutes",               // exceeds 59
+		"every 30 hours",                 // exceeds 23
+		"last of the month at 9am",       // cron can't express "last"
+		"on the 40th at noon",            // out-of-range day
+		"flibbertigibbet",                // pure nonsense
+		"every 2 weeks",                  // cron can't do a multi-week cadence
+		"every other week",               // same, spelled differently
+		"biweekly",                       // same
+		"fortnightly",                    // same
+		"every 40 days",                  // exceeds a month
+		"every 13 months",                // exceeds a year
+		"every day at 9:15am and 5:45pm", // list with mismatched minutes
 	}
 	for _, p := range bad {
 		if got, err := Parse(p); err == nil {

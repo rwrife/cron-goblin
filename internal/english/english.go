@@ -24,6 +24,16 @@
 //	"first of the month at 9am"         -> 0 9 1 * *
 //	"on the 15th at noon"               -> 0 12 15 * *
 //	"every january at midnight"         -> 0 0 1 1 *  (first of January)
+//	"every morning"                     -> 0 6 * * *
+//	"every night"                       -> 0 21 * * *
+//	"every weekday evening"             -> 0 18 * * 1-5
+//	"once a day"                        -> 0 0 * * *
+//	"twice a day"                       -> 0 0,12 * * *
+//	"every day at 9am and 5pm"          -> 0 9,17 * * *
+//	"every 3 days"                      -> 0 0 */3 * *
+//	"every other day"                   -> 0 0 */2 * *
+//	"quarterly"                         -> 0 0 1 1,4,7,10 *
+//	"yearly"                            -> 0 0 1 1 *
 //
 // Anything outside this grammar returns an error (with the goblin's blessing
 // to grumble elsewhere) rather than guessing — a wrong cron line is worse than
@@ -33,6 +43,7 @@ package english
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -104,6 +115,34 @@ var ordinalWord = map[string]int{
 	"last": -1, // handled specially: cron has no real "last", we reject it clearly
 }
 
+// namedTime maps fuzzy times-of-day people actually say to a concrete
+// (hour, minute). These are conventions, deliberately chosen once so output
+// stays deterministic: "morning" is 6am, "noon"/"midday" 12pm, "afternoon"
+// 12pm as well (early afternoon), "evening" 6pm, "night" 9pm, "midnight" 0.
+// They work both as a bare recurrence ("every morning") and as a time clause
+// ("every weekday at night").
+var namedTime = map[string]struct{ hour, minute int }{
+	"midnight":  {0, 0},
+	"morning":   {6, 0},
+	"noon":      {12, 0},
+	"midday":    {12, 0},
+	"afternoon": {12, 0},
+	"evening":   {18, 0},
+	"night":     {21, 0},
+	"tonight":   {21, 0},
+	"lunchtime": {12, 0},
+	"noontime":  {12, 0},
+}
+
+// countPerPeriod maps "once"/"twice"/... to how many evenly spaced fires per
+// period the phrase implies (used by "twice a day", "once an hour").
+var countPerPeriod = map[string]int{
+	"once": 1, "one time": 1, "1 time": 1,
+	"twice": 2, "two times": 2, "2 times": 2,
+	"thrice": 3, "three times": 3, "3 times": 3,
+	"four times": 4, "4 times": 4,
+}
+
 // timeRE matches an explicit clock time: "9", "9am", "9:30", "6:30pm",
 // "12:00 am". Hour is required; minutes and the am/pm marker are optional.
 var timeRE = regexp.MustCompile(`^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$`)
@@ -111,6 +150,17 @@ var timeRE = regexp.MustCompile(`^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$`)
 // everyNUnitRE matches "every 15 minutes" / "every 2 hours" (unit may be
 // singular or plural). The leading "every " is stripped before matching.
 var everyNUnitRE = regexp.MustCompile(`^(\d+)\s+(minute|minutes|min|mins|hour|hours|hr|hrs)$`)
+
+// everyNDaysRE matches "3 days" / "2 days" (the "every " prefix is already
+// stripped by the caller). It drives a day-of-month step, e.g. */3.
+var everyNDaysRE = regexp.MustCompile(`^(\d+)\s+(?:day|days)$`)
+
+// everyNMonthsRE matches "2 months" / "3 months" → a month step (*/N).
+var everyNMonthsRE = regexp.MustCompile(`^(\d+)\s+(?:month|months)$`)
+
+// everyNWeeksRE matches "2 weeks" / "3 weeks". Cron has no true multi-week
+// period, so these are rejected with a clear message rather than approximated.
+var everyNWeeksRE = regexp.MustCompile(`^(\d+)\s+(?:week|weeks)$`)
 
 // nthOfMonthRE matches "the 15th", "15th", "the 1st" → a day-of-month number.
 var nthOfMonthRE = regexp.MustCompile(`^(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)?$`)
@@ -133,14 +183,15 @@ func Parse(phrase string) (string, error) {
 
 	c := newCron()
 
-	// 1) Apply the time-of-day clause, if present. This sets minute+hour.
+	// 1) Apply the time-of-day clause, if present. This sets minute+hour and
+	// supports a small list of times ("9am and 5pm") that share a minute.
 	timeApplied := false
 	if timeStr != "" {
-		min, hr, err := parseTimeOfDay(phrase, timeStr)
+		minField, hourField, err := parseTimeClause(phrase, timeStr)
 		if err != nil {
 			return "", err
 		}
-		c.minute, c.hour = strconv.Itoa(min), strconv.Itoa(hr)
+		c.minute, c.hour = minField, hourField
 		timeApplied = true
 	}
 
@@ -181,6 +232,11 @@ func normalize(s string) string {
 // looks for " at " and treats what follows as the time only when it parses as
 // a clock value or a named time-of-day (noon/midnight); otherwise the whole
 // phrase is the recurrence (e.g. "first of the month" has no "at").
+//
+// It also recognizes a trailing named time-of-day with no "at" — the way
+// people actually talk: "every morning", "every weekday evening",
+// "weekends at night". The named word is peeled off as the time clause and the
+// remainder (if any) stays the recurrence.
 func splitAtTime(s string) (recur, timeStr string) {
 	// Named whole-phrase times with no explicit "at".
 	switch s {
@@ -196,6 +252,12 @@ func splitAtTime(s string) (recur, timeStr string) {
 		if strings.HasPrefix(s, "at ") {
 			return "", strings.TrimSpace(s[len("at "):])
 		}
+		// A trailing named time-of-day without "at": "every morning",
+		// "every weekday evening". Peel it off so the recurrence can be scoped
+		// independently. "in the morning" is normalized to "morning" first.
+		if r, t, ok := splitTrailingNamedTime(s); ok {
+			return r, t
+		}
 		return s, ""
 	}
 	recur = strings.TrimSpace(s[:idx])
@@ -203,14 +265,40 @@ func splitAtTime(s string) (recur, timeStr string) {
 	return recur, timeStr
 }
 
+// splitTrailingNamedTime detects a phrase ending in a named time-of-day
+// ("morning", "evening", "night", ...), optionally preceded by "in the",
+// returning the leading recurrence and the bare time word. "every morning"
+// yields ("", "morning"); "every weekday evening" yields ("every weekday",
+// "evening").
+func splitTrailingNamedTime(s string) (recur, timeStr string, ok bool) {
+	fields := strings.Fields(s)
+	if len(fields) == 0 {
+		return "", "", false
+	}
+	last := fields[len(fields)-1]
+	if _, isNamed := namedTime[last]; !isNamed {
+		return "", "", false
+	}
+	rest := strings.TrimSpace(strings.TrimSuffix(s, last))
+	// Drop a connective "in the" / "in" that often precedes the time word.
+	rest = strings.TrimSuffix(rest, " in the")
+	rest = strings.TrimSuffix(rest, " in")
+	rest = strings.TrimSpace(rest)
+	// Bare "morning"/"evening" alone (optionally "in the morning") means daily
+	// at that time.
+	switch rest {
+	case "", "every", "each", "in the", "in", "the":
+		return "", last, true
+	}
+	return rest, last, true
+}
+
 // parseTimeOfDay parses a time clause into minute and hour (24h). It accepts
-// "noon", "midnight", and clock forms like "9", "9am", "6:30pm", "14:00".
+// "noon", "midnight", other named times-of-day ("morning", "evening",
+// "night"), and clock forms like "9", "9am", "6:30pm", "14:00".
 func parseTimeOfDay(phrase, timeStr string) (minute, hour int, err error) {
-	switch timeStr {
-	case "noon", "midday":
-		return 0, 12, nil
-	case "midnight":
-		return 0, 0, nil
+	if nt, ok := namedTime[timeStr]; ok {
+		return nt.minute, nt.hour, nil
 	}
 
 	m := timeRE.FindStringSubmatch(timeStr)
@@ -252,6 +340,49 @@ func parseTimeOfDay(phrase, timeStr string) (minute, hour int, err error) {
 	return minute, hour, nil
 }
 
+// parseTimeClause parses one or more times-of-day sharing a single minute into
+// cron minute/hour fields. A single time ("6:30pm") yields ("30","18"); a list
+// ("9am and 5pm", "9am, noon and 5pm") yields ("0","9,12,17"). Because cron has
+// exactly one minute field, every listed time must share the same minute — a
+// mixed-minute list like "9:15am and 5:45pm" is rejected with a clear message
+// rather than silently dropping precision. Hours are emitted sorted and
+// de-duplicated for a stable, canonical expression.
+func parseTimeClause(phrase, timeStr string) (minuteField, hourField string, err error) {
+	parts := splitList(timeStr)
+	if len(parts) <= 1 {
+		min, hr, e := parseTimeOfDay(phrase, timeStr)
+		if e != nil {
+			return "", "", e
+		}
+		return strconv.Itoa(min), strconv.Itoa(hr), nil
+	}
+
+	var sharedMin = -1
+	hours := make([]int, 0, len(parts))
+	seen := make(map[int]bool, len(parts))
+	for _, p := range parts {
+		min, hr, e := parseTimeOfDay(phrase, p)
+		if e != nil {
+			return "", "", e
+		}
+		if sharedMin == -1 {
+			sharedMin = min
+		} else if min != sharedMin {
+			return "", "", errf(phrase, "a list of times must share the same minute (got :%02d and :%02d); cron has only one minute field", sharedMin, min)
+		}
+		if !seen[hr] {
+			seen[hr] = true
+			hours = append(hours, hr)
+		}
+	}
+	sort.Ints(hours)
+	strs := make([]string, len(hours))
+	for i, h := range hours {
+		strs[i] = strconv.Itoa(h)
+	}
+	return strconv.Itoa(sharedMin), strings.Join(strs, ","), nil
+}
+
 // applyRecurrence interprets the recurrence clause and mutates c accordingly.
 // It returns subHour=true when the clause established a sub-hourly period
 // (every N minutes), which the caller uses to reject a conflicting fixed time.
@@ -270,6 +401,34 @@ func applyRecurrence(phrase string, c *cron, recur string, timeApplied bool) (su
 			return false, errf(phrase, "nothing to schedule")
 		}
 		return false, nil
+	}
+
+	// --- "once/twice a day", "once an hour" ----------------------------------
+	// These read on the raw recurrence (no "every " to strip). "a"/"an"/"per"
+	// are all accepted as the connective.
+	if n, period, ok := parseCountPerPeriod(recur); ok {
+		switch period {
+		case "day":
+			if timeApplied {
+				return false, errf(phrase, "%q already implies its own times; drop the \"at ...\"", recur)
+			}
+			c.minute = "0"
+			c.hour = evenlySpaced(n, 24)
+			return false, nil
+		case "hour":
+			if timeApplied {
+				return false, errf(phrase, "%q already implies its own minutes; drop the \"at ...\"", recur)
+			}
+			c.minute = evenlySpaced(n, 60)
+			c.hour = "*"
+			return n > 1, nil // more-than-once-an-hour is sub-hourly
+		}
+	}
+
+	// "every other X" means every 2nd X. Rewrite to the numeric form so the
+	// rules below handle it uniformly ("every other day" -> "every 2 days").
+	if rest, ok := strings.CutPrefix(recur, "every other "); ok {
+		recur = "every 2 " + pluralizeUnit(rest)
 	}
 
 	// Strip a leading "every " for the period/day forms ("every day",
@@ -316,6 +475,18 @@ func applyRecurrence(phrase string, c *cron, recur string, timeApplied bool) (su
 		c.dom = "1"
 		defaultTime(c, timeApplied)
 		return false, nil
+	case "quarter", "quarterly":
+		// First of each calendar quarter: Jan, Apr, Jul, Oct.
+		c.dom, c.month = "1", "1,4,7,10"
+		defaultTime(c, timeApplied)
+		return false, nil
+	case "year", "yearly", "annually", "annual":
+		// New Year's: first minute of Jan 1.
+		c.dom, c.month = "1", "1"
+		defaultTime(c, timeApplied)
+		return false, nil
+	case "biweekly", "bi-weekly", "fortnightly", "fortnight":
+		return false, errf(phrase, "cron can't express a bi-weekly/fortnightly cadence; pick specific days or a day-of-month")
 	}
 
 	// --- "every N minutes/hours" ---------------------------------------------
@@ -339,6 +510,57 @@ func applyRecurrence(phrase string, c *cron, recur string, timeApplied bool) (su
 		c.hour = "*/" + strconv.Itoa(n)
 		c.minute = "0" // top of the hour, every N hours
 		return false, nil
+	}
+
+	// --- "every N days" ------------------------------------------------------
+	// Cron can't truly do "every N days" across month boundaries; the honest
+	// approximation is a day-of-month step (*/N), which resets on the 1st. We
+	// accept it for the common small intervals and let the readback/docs make
+	// the caveat visible rather than refusing a very common phrase.
+	if m := everyNDaysRE.FindStringSubmatch(body); m != nil {
+		n, _ := strconv.Atoi(m[1])
+		if n <= 0 {
+			return false, errf(phrase, "interval must be positive")
+		}
+		if n == 1 {
+			defaultTime(c, timeApplied)
+			return false, nil // "every 1 day" == daily
+		}
+		if n > 31 {
+			return false, errf(phrase, "an every-%d-days interval exceeds a month; use a monthly or dated schedule", n)
+		}
+		c.dom = "*/" + strconv.Itoa(n)
+		defaultTime(c, timeApplied)
+		return false, nil
+	}
+
+	// --- "every N months" ----------------------------------------------------
+	if m := everyNMonthsRE.FindStringSubmatch(body); m != nil {
+		n, _ := strconv.Atoi(m[1])
+		if n <= 0 {
+			return false, errf(phrase, "interval must be positive")
+		}
+		if n > 12 {
+			return false, errf(phrase, "an every-%d-months interval exceeds a year", n)
+		}
+		if c.dom == "*" {
+			c.dom = "1" // anchor to the 1st so it fires once per stepped month
+		}
+		if n == 1 {
+			defaultTime(c, timeApplied)
+			return false, nil // "every 1 month" == monthly
+		}
+		c.month = "*/" + strconv.Itoa(n)
+		defaultTime(c, timeApplied)
+		return false, nil
+	}
+
+	// --- "every N weeks" (incl. bi-weekly) -----------------------------------
+	// Cron cannot express a true multi-week cadence (a day-of-week step lands on
+	// several weekdays within the same week, not "every other Monday"). Refuse
+	// honestly instead of emitting something subtly wrong.
+	if everyNWeeksRE.MatchString(body) {
+		return false, errf(phrase, "cron can't express a multi-week cadence (bi-weekly/fortnightly); pick specific days or a day-of-month")
 	}
 
 	// --- named weekday list: "monday", "tuesday and thursday", "mon,wed,fri" --
@@ -457,4 +679,62 @@ func singularize(s string) string {
 		return s[:len(s)-1]
 	}
 	return s
+}
+
+// pluralizeUnit ensures a bare unit reads as a plural for the "every N units"
+// rules ("day" -> "days"), so "every other day" can be rewritten to
+// "every 2 days" and reuse the numeric path.
+func pluralizeUnit(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" || strings.HasSuffix(s, "s") {
+		return s
+	}
+	return s + "s"
+}
+
+// parseCountPerPeriod recognizes "once a day", "twice a day", "once an hour",
+// "3 times a day", etc. It returns the fire count, the period ("day"/"hour"),
+// and ok. The connective may be "a", "an", or "per".
+func parseCountPerPeriod(recur string) (count int, period string, ok bool) {
+	s := recur
+	var rest string
+	for _, sep := range []string{" a ", " an ", " per "} {
+		if i := strings.Index(s, sep); i >= 0 {
+			countPart := strings.TrimSpace(s[:i])
+			rest = strings.TrimSpace(s[i+len(sep):])
+			n, found := countPerPeriod[countPart]
+			if !found {
+				return 0, "", false
+			}
+			switch singularize(rest) {
+			case "day":
+				return n, "day", true
+			case "hour":
+				return n, "hour", true
+			default:
+				return 0, "", false
+			}
+		}
+	}
+	return 0, "", false
+}
+
+// evenlySpaced returns a cron field listing n values spread as evenly as
+// possible across a period of the given size starting at 0. For n==1 it is
+// "0"; for divisors of size it uses the step form ("*/12" style is avoided in
+// favor of an explicit list so the output reads unambiguously). Example:
+// evenlySpaced(2, 24) -> "0,12"; evenlySpaced(2, 60) -> "0,30".
+func evenlySpaced(n, size int) string {
+	if n <= 1 {
+		return "0"
+	}
+	if n >= size {
+		return "*"
+	}
+	step := size / n
+	vals := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		vals = append(vals, strconv.Itoa(i*step))
+	}
+	return strings.Join(vals, ",")
 }
