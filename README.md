@@ -31,6 +31,12 @@ every-minute loops, and expressions that never fire.
   dead expressions, too-frequent jobs, same-instant collisions between jobs, and
   (with `--tz`) schedules that land in a daylight-saving gap/overlap
   (`--tz`, `--json`, `--ci`). ✅ *available now*
+- **`goblin stagger <crontab>`** — break up "thundering herds": when several
+  jobs fire on the exact same minute (the classic `0 9 * * *` pile-up), spread
+  them deterministically across a window (`--max-spread`) so they stop
+  stampeding the box together. Prints the rewritten crontab by default (a dry
+  run); `--write --yes` overwrites the file in place — never without that
+  explicit confirmation. `--json` for agents. ✅ *available now*
 - **`goblin from "every weekday at 6:30pm"`** — plain English → a cron
   expression. Deterministic and fully offline (a hand-rolled rule grammar, no
   LLM, no network); `--json` for agents. ✅ *available now*
@@ -94,8 +100,9 @@ Prebuilt binaries for Linux, macOS, and Windows ship on every tagged release
 
 That's the v0.1 milestone arc complete. See
 [`PLAN.md`](./PLAN.md) for the roadmap and the v0.2+ backlog (the DST danger
-report has since landed in `goblin lint --tz`; dialect translation,
-`goblin diff`, and more remain).
+report has since landed in `goblin lint --tz` and the thundering-herd
+auto-stagger in `goblin stagger`; dialect translation, `goblin diff`, and more
+remain).
 
 ## Install
 
@@ -170,6 +177,11 @@ crontab -l | ./goblin lint -            # lint your own crontab via stdin
 ./goblin lint --json crontab.txt        # stable JSON report for scripts/agents
 ./goblin lint --tz America/New_York crontab.txt   # also flag DST gap/overlap hazards
 ./goblin lint --ci crontab.txt          # non-zero exit if any warning/error
+
+./goblin stagger crontab.txt            # preview a spread for same-minute pile-ups
+./goblin stagger --max-spread 30 crontab.txt   # spread each herd within 30 minutes
+./goblin stagger --json crontab.txt     # machine-readable stagger plan for agents
+./goblin stagger --write --yes crontab.txt     # rewrite the file in place (confirmed)
 
 ./goblin doctor                         # lint the crontab you actually have installed
 ./goblin doctor --json                  # stable JSON report for scripts/agents
