@@ -40,6 +40,12 @@ every-minute loops, and expressions that never fire.
 - **`goblin from "every weekday at 6:30pm"`** — plain English → a cron
   expression. Deterministic and fully offline (a hand-rolled rule grammar, no
   LLM, no network); `--json` for agents. ✅ *available now*
+- **`goblin convert --from quartz "0 0 9 ? * MON-FRI"`** — translate a schedule
+  from another dialect into standard 5-field cron. Handles Quartz's seconds
+  field, `?` marker, optional year, and 1-7 (SUN-SAT) weekday numbering. Only
+  lossless conversions succeed; sub-minute precision, a specific year, and the
+  `L`/`W`/`#` specials are refused with a specific error instead of a silent
+  mistranslation. `--json` for agents. ✅ *available now*
 - **`goblin doctor`** — lint the crontab you actually have installed: reads it
   via `crontab -l` and runs the same rules as `goblin lint` (`--json`, `--ci`,
   `--user`). A user with no crontab is reported calmly and exits zero.
@@ -100,8 +106,9 @@ Prebuilt binaries for Linux, macOS, and Windows ship on every tagged release
 
 That's the v0.1 milestone arc complete. See
 [`PLAN.md`](./PLAN.md) for the roadmap and the v0.2+ backlog (the DST danger
-report has since landed in `goblin lint --tz` and the thundering-herd
-auto-stagger in `goblin stagger`; dialect translation, `goblin diff`, and more
+report has since landed in `goblin lint --tz`, the thundering-herd
+auto-stagger in `goblin stagger`, and dialect translation has its first slice
+in `goblin convert --from quartz`; more dialects, `goblin diff`, and the rest
 remain).
 
 ## Install
@@ -171,6 +178,11 @@ go build -o goblin ./cmd/goblin
 ./goblin from "every weekday at 6:30pm" # -> 30 18 * * 1-5
 ./goblin from --json "daily at 9am"     # machine-readable result for agents
 ./goblin from "every blue moon"         # honest error instead of a wrong guess
+
+./goblin convert --from quartz "0 0 9 ? * MON-FRI"  # Quartz -> 0 9 * * MON-FRI
+./goblin convert --from quartz "0 0 9 ? * 2-6"      # 2-6 (SUN-SAT) -> 1-5 weekdays
+./goblin convert --from quartz --json "0 30 2 * * ?" # machine-readable result
+./goblin convert --from quartz "30 0 12 * * ?"      # honest error: cron has no seconds
 
 ./goblin lint /etc/crontab              # lint a crontab file
 crontab -l | ./goblin lint -            # lint your own crontab via stdin
