@@ -89,9 +89,15 @@ Prebuilt binaries for Linux, macOS, and Windows ship on every tagged release
   fully offline rule grammar (no LLM, no network). It covers the common cases
   — "every 15 minutes", "every day at 9am", "every weekday at 6:30pm",
   "weekends at noon", "every monday at 8am", "first of the month at 9am",
-  "every january at midnight" — prints the cron line first (so it pipes), echoes
+  "every january at midnight", named times of day ("every morning",
+  "every weekday evening", "at night"), count-per-period phrasings ("once a
+  day", "twice a day", "once an hour"), multi-day/-month intervals ("every 3
+  days", "every other day", "every other month"), calendar cadences
+  ("quarterly", "yearly"), and lists of times that share a minute ("every day
+  at 9am and 5pm") — prints the cron line first (so it pipes), echoes
   a plain-English readback plus the next fire, and rejects anything outside the
-  grammar rather than guessing. `--json` for agents. `goblin doctor` now lints
+  grammar rather than guessing (it won't fake an impossible cadence like
+  bi-weekly). `--json` for agents. `goblin doctor` now lints
   your installed crontab (`crontab -l`) with the same engine,
   `goblin completion <shell>` emits tab-completion scripts for bash/zsh/fish/
   PowerShell, and a [goreleaser](https://goreleaser.com) pipeline ships
