@@ -2,16 +2,18 @@
 // dialect into standard 5-field cron (the only thing the rest of the tool, and
 // most Unix crontabs, actually speak).
 //
-// The first supported source dialect is Quartz (the Java scheduler used by
-// Spring, Elasticsearch, and friends), whose 6/7-field expressions,  `?` marker,
-// and 1-7 weekday numbering trip people up constantly:
+// The supported source dialects are Quartz (the Java scheduler used by Spring,
+// Elasticsearch, and friends) and systemd's OnCalendar timer syntax — both trip
+// people up constantly:
 //
-//	goblin convert --from quartz "0 0 9 ? * MON-FRI"   -> 0 9 * * MON-FRI
-//	goblin convert --from quartz "0 30 2 * * ?"        -> 30 2 * * *
+//	goblin convert --from quartz  "0 0 9 ? * MON-FRI"  -> 0 9 * * MON-FRI
+//	goblin convert --from quartz  "0 30 2 * * ?"        -> 30 2 * * *
+//	goblin convert --from systemd "Mon..Fri 09:00"     -> 0 9 * * MON-FRI
+//	goblin convert --from systemd weekly               -> 0 0 * * MON
 //
-// When a Quartz construct genuinely has no standard-cron equivalent (a seconds
-// value, a specific year, or the `L`/`W`/`#` specials), the goblin refuses with
-// a specific error instead of silently emitting a wrong schedule.
+// When a construct genuinely has no standard-cron equivalent (a seconds value,
+// a specific year, Quartz's `L`/`W`/`#`, or systemd's `~`), the goblin refuses
+// with a specific error instead of silently emitting a wrong schedule.
 package main
 
 import (
@@ -59,18 +61,23 @@ func newConvertCmd() *cobra.Command {
 		Short: "Convert a cron schedule from another dialect into standard cron",
 		Long: "Translate a cron schedule written in another dialect into a standard\n" +
 			"5-field cron expression. Deterministic and fully offline.\n\n" +
-			"Supported source dialect: quartz (6/7-field Java Quartz, with `?`,\n" +
-			"1-7 SUN-SAT weekdays, and an optional year). The target is standard\n" +
-			"cron (`--to cron`, the default); k8s CronJob schedules already are\n" +
-			"standard cron.\n\n" +
-			"Only lossless conversions succeed. Quartz features that standard cron\n" +
-			"cannot express — sub-minute (seconds) precision, a specific year, and\n" +
-			"the `L` (last), `W` (nearest weekday), and `#` (nth weekday) specials —\n" +
-			"are refused with a specific error rather than silently mistranslated.\n\n" +
+			"Supported source dialects:\n" +
+			"  quartz  6/7-field Java Quartz, with `?`, 1-7 SUN-SAT weekdays,\n" +
+			"          and an optional year.\n" +
+			"  systemd systemd.timer OnCalendar (DayOfWeek Y-M-D H:M:S), plus the\n" +
+			"          named shorthands daily/weekly/monthly/quarterly/yearly.\n" +
+			"The target is standard cron (`--to cron`, the default); k8s CronJob\n" +
+			"schedules already are standard cron.\n\n" +
+			"Only lossless conversions succeed. Constructs standard cron cannot\n" +
+			"express — sub-minute (seconds) precision, a specific year, Quartz's\n" +
+			"`L`/`W`/`#` specials, and systemd's `~` (days-from-month-end) — are\n" +
+			"refused with a specific error rather than silently mistranslated.\n\n" +
 			"Pass --json for a machine-readable result an agent can consume.",
 		Example: "  goblin convert --from quartz \"0 0 9 ? * MON-FRI\"\n" +
 			"  goblin convert --from quartz \"0 30 2 * * ?\"\n" +
-			"  goblin convert --from quartz --json \"0 0 12 1/2 * ?\"",
+			"  goblin convert --from systemd \"Mon..Fri 09:00\"\n" +
+			"  goblin convert --from systemd \"*-*-01 00:00\"\n" +
+			"  goblin convert --from systemd --json weekly",
 		// Accept the expression as one quoted arg, or several bare words we join,
 		// so `goblin convert --from quartz 0 0 9 ? * MON-FRI` works unquoted too.
 		Args: cobra.MinimumNArgs(1),
@@ -163,7 +170,7 @@ func newConvertCmd() *cobra.Command {
 		SilenceErrors: true,
 	}
 
-	cmd.Flags().StringVar(&from, "from", "", "source dialect to convert from (quartz)")
+	cmd.Flags().StringVar(&from, "from", "", "source dialect to convert from (quartz, systemd)")
 	cmd.Flags().StringVar(&to, "to", "cron", "target dialect (cron)")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit a machine-readable JSON result")
 	cmd.Flags().IntVarP(&count, "count", "n", 1, "how many upcoming runs to compute for the preview")
@@ -189,7 +196,7 @@ func convertToCron(src dialect.Dialect, expr string) (string, error) {
 		}
 		return sched.Raw, nil
 	case dialect.Systemd:
-		return "", fmt.Errorf("converting from systemd OnCalendar is not supported yet")
+		return dialect.FromSystemd(expr)
 	default:
 		return "", fmt.Errorf("converting from %q is not supported", src)
 	}
