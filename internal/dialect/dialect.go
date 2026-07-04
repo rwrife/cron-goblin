@@ -11,9 +11,10 @@
 // specific error when a construct genuinely has no 5-field equivalent (a lossy
 // or impossible conversion) rather than silently producing a wrong schedule.
 //
-// This first slice implements Quartz -> standard cron (see FromQuartz). Other
-// dialects (Kubernetes CronJob, systemd OnCalendar) are tracked in the backlog
-// and can plug in here behind the same "convert or honestly refuse" contract.
+// This package implements Quartz -> standard cron (see FromQuartz) and systemd
+// OnCalendar -> standard cron (see FromSystemd). Kubernetes CronJob schedules
+// are already standard 5-field cron, so K8s is treated as an alias of Cron.
+// Every converter follows the same "convert or honestly refuse" contract.
 package dialect
 
 import (
@@ -22,9 +23,9 @@ import (
 	"strings"
 )
 
-// Dialect identifies a cron "flavor" understood by this package. Only Quartz
-// is implemented so far; the others are named for forward-looking CLI wiring
-// and clearer "not yet supported" errors.
+// Dialect identifies a cron "flavor" understood by this package. Quartz and
+// systemd OnCalendar have dedicated converters; K8s is standard cron under the
+// hood and is validated as an alias of Cron.
 type Dialect string
 
 const (
@@ -34,7 +35,9 @@ const (
 	// (seconds, minute, hour, day-of-month, month, day-of-week, [year]) with
 	// `?`, `L`, `W`, and `#` special characters and 1-7 (SUN-SAT) weekdays.
 	Quartz Dialect = "quartz"
-	// Systemd is the systemd.timer OnCalendar dialect. Not yet implemented.
+	// Systemd is the systemd.timer OnCalendar dialect: an optional
+	// [DayOfWeek] [Year-Month-Day] [Hour:Minute:Second] expression plus named
+	// shorthands (daily, weekly, monthly, ...). See FromSystemd.
 	Systemd Dialect = "systemd"
 	// K8s is the Kubernetes CronJob schedule dialect. In practice it is standard
 	// 5-field cron, so it is treated as an alias of Cron for validation.
@@ -59,11 +62,11 @@ func ParseDialect(name string) (Dialect, error) {
 }
 
 // ConvertError describes a conversion that cannot be performed without changing
-// the schedule's meaning. It names the offending Quartz field so the caller can
+// the schedule's meaning. It names the offending source field so the caller can
 // point the user at the exact problem, and carries a Lossy flag distinguishing
-// "impossible" (Lossy=false: malformed / unsupported dialect) from "lossy"
-// (Lossy=true: valid Quartz whose semantics standard cron simply cannot carry,
-// e.g. a seconds value or a specific year).
+// "impossible" (Lossy=false: malformed / unsupported construct) from "lossy"
+// (Lossy=true: a valid source expression whose semantics standard cron simply
+// cannot carry, e.g. a seconds value or a specific year).
 type ConvertError struct {
 	Dialect Dialect // source dialect being converted from
 	Field   string  // human name of the offending field, when applicable

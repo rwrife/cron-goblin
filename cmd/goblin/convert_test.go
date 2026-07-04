@@ -205,3 +205,73 @@ func TestConvertK8sIsCron(t *testing.T) {
 		t.Errorf("k8s passthrough = %q, want normalized %q", first, "*/5 * * * *")
 	}
 }
+
+// TestConvertSystemdHumanOutput exercises the systemd source path end to end:
+// a weekday-range OnCalendar expression should land as the first stdout line.
+func TestConvertSystemdHumanOutput(t *testing.T) {
+	stdout, stderr, err := runConvert(t, "--quiet", "--from", "systemd", "Mon..Fri 09:00")
+	if err != nil {
+		t.Fatalf("Execute() error: %v", err)
+	}
+	first := strings.SplitN(strings.TrimSpace(stdout), "\n", 2)[0]
+	if first != "0 9 * * MON,TUE,WED,THU,FRI" {
+		t.Errorf("first stdout line = %q, want the converted cron expression", first)
+	}
+	if strings.TrimSpace(stderr) != "" {
+		t.Errorf("--quiet should silence stderr, got: %q", stderr)
+	}
+}
+
+// TestConvertSystemdShorthand confirms a named OnCalendar shorthand converts.
+func TestConvertSystemdShorthand(t *testing.T) {
+	stdout, _, err := runConvert(t, "--quiet", "--from", "systemd", "weekly")
+	if err != nil {
+		t.Fatalf("Execute() error: %v", err)
+	}
+	first := strings.SplitN(strings.TrimSpace(stdout), "\n", 2)[0]
+	if first != "0 0 * * MON" {
+		t.Errorf("weekly shorthand = %q, want %q", first, "0 0 * * MON")
+	}
+}
+
+// TestConvertSystemdJSON checks the machine-readable path reports the systemd
+// source dialect and a usable converted cron line.
+func TestConvertSystemdJSON(t *testing.T) {
+	stdout, _, err := runConvert(t, "--quiet", "--json", "--from", "systemd", "*-*-01 00:00")
+	if err != nil {
+		t.Fatalf("Execute() error: %v", err)
+	}
+	var payload struct {
+		From string `json:"from"`
+		To   string `json:"to"`
+		Cron string `json:"cron"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, stdout)
+	}
+	if payload.From != "systemd" {
+		t.Errorf("from = %q, want systemd", payload.From)
+	}
+	if payload.To != "cron" {
+		t.Errorf("to = %q, want cron", payload.To)
+	}
+	if payload.Cron != "0 0 1 * *" {
+		t.Errorf("cron = %q, want %q", payload.Cron, "0 0 1 * *")
+	}
+}
+
+// TestConvertSystemdLossyRefusalHasHint verifies the honest-refusal path for a
+// systemd expression standard cron can't carry (a specific year): it errors AND
+// prints the shared lossy hint.
+func TestConvertSystemdLossyRefusalHasHint(t *testing.T) {
+	_, stderr, err := runConvert(t, "--from", "systemd", "2027-01-01 00:00")
+	if err == nil {
+		t.Fatal("expected a lossy-conversion error for a specific year")
+	}
+	if !strings.Contains(stderr, "error:") {
+		t.Errorf("expected an error line on stderr, got: %q", stderr)
+	}
+	if !strings.Contains(stderr, "hint:") {
+		t.Errorf("expected a hint explaining the lossy refusal, got: %q", stderr)
+	}
+}
