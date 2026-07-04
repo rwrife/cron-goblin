@@ -193,7 +193,7 @@ func TestConvertSpecialCharRefused(t *testing.T) {
 	}
 }
 
-// TestConvertK8sIsCron confirms k8s schedules (already standard cron) pass
+// TestConvertK8sIsCron confirms plain k8s schedules (already standard cron) pass
 // through validated and normalized rather than being rejected.
 func TestConvertK8sIsCron(t *testing.T) {
 	stdout, _, err := runConvert(t, "--quiet", "--from", "k8s", "*/5   *  * * *")
@@ -203,6 +203,36 @@ func TestConvertK8sIsCron(t *testing.T) {
 	first := strings.SplitN(strings.TrimSpace(stdout), "\n", 2)[0]
 	if first != "*/5 * * * *" {
 		t.Errorf("k8s passthrough = %q, want normalized %q", first, "*/5 * * * *")
+	}
+}
+
+// TestConvertK8sMacro exercises the k8s source path's `@`-macro expansion end to
+// end: a robfig/cron macro a CronJob accepts should land as the first stdout
+// line as standard 5-field cron.
+func TestConvertK8sMacro(t *testing.T) {
+	stdout, stderr, err := runConvert(t, "--quiet", "--from", "k8s", "@daily")
+	if err != nil {
+		t.Fatalf("Execute() error: %v", err)
+	}
+	first := strings.SplitN(strings.TrimSpace(stdout), "\n", 2)[0]
+	if first != "0 0 * * *" {
+		t.Errorf("@daily = %q, want %q", first, "0 0 * * *")
+	}
+	if strings.TrimSpace(stderr) != "" {
+		t.Errorf("--quiet should silence stderr, got: %q", stderr)
+	}
+}
+
+// TestConvertK8sRebootRefused confirms the CLI surfaces the k8s-specific refusal
+// for @reboot (a vixie-only event a CronJob cannot honor) with a non-zero exit
+// and an explanatory stderr message.
+func TestConvertK8sRebootRefused(t *testing.T) {
+	_, stderr, err := runConvert(t, "--quiet", "--from", "k8s", "@reboot")
+	if err == nil {
+		t.Fatal("expected an error for @reboot under --from k8s")
+	}
+	if !strings.Contains(stderr, "@reboot") {
+		t.Errorf("expected @reboot named on stderr, got: %q", stderr)
 	}
 }
 
