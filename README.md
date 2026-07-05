@@ -44,11 +44,14 @@ every-minute loops, and expressions that never fire.
   from another dialect into standard 5-field cron. Handles Quartz's seconds
   field, `?` marker, optional year, and 1-7 (SUN-SAT) weekday numbering, plus
   systemd `OnCalendar` timers (`--from systemd "Mon..Fri 09:00"`, including the
-  `daily`/`weekly`/`monthly`/`quarterly`/`yearly` shorthands). k8s CronJob
-  schedules are already standard cron. Only lossless conversions succeed;
-  sub-minute precision, a specific year, Quartz's `L`/`W`/`#`, and systemd's `~`
-  are refused with a specific error instead of a silent mistranslation. `--json`
-  for agents. ✅ *available now*
+  `daily`/`weekly`/`monthly`/`quarterly`/`yearly` shorthands). `--from k8s`
+  validates a Kubernetes CronJob schedule: it expands the robfig/cron `@`-macros
+  a CronJob accepts (`@daily`, `@hourly`, `@weekly`, ...), passes plain 5-field
+  cron through, and refuses schedules the apiserver rejects — vixie-only
+  `@reboot` and Quartz specials pasted in from Java — pointing you at the right
+  fix. Only lossless conversions succeed; sub-minute precision, a specific year,
+  Quartz's `L`/`W`/`#`, and systemd's `~` are refused with a specific error
+  instead of a silent mistranslation. `--json` for agents. ✅ *available now*
 - **`goblin doctor`** — lint the crontab you actually have installed: reads it
   via `crontab -l` and runs the same rules as `goblin lint` (`--json`, `--ci`,
   `--user`). A user with no crontab is reported calmly and exits zero.
@@ -116,9 +119,9 @@ Prebuilt binaries for Linux, macOS, and Windows ship on every tagged release
 That's the v0.1 milestone arc complete. See
 [`PLAN.md`](./PLAN.md) for the roadmap and the v0.2+ backlog (the DST danger
 report has since landed in `goblin lint --tz`, the thundering-herd
-auto-stagger in `goblin stagger`, and dialect translation now covers Quartz and
-systemd `OnCalendar` in `goblin convert`; Kubernetes CronJob validation, richer
-dialect coverage, `goblin diff`, and the rest remain).
+auto-stagger in `goblin stagger`, and dialect translation now covers Quartz,
+systemd `OnCalendar`, and Kubernetes CronJob schedules in `goblin convert`;
+richer dialect coverage, `goblin diff`, and the rest remain).
 
 ## Install
 
@@ -194,6 +197,8 @@ go build -o goblin ./cmd/goblin
 ./goblin convert --from quartz "30 0 12 * * ?"      # honest error: cron has no seconds
 ./goblin convert --from systemd "Mon..Fri 09:00"    # OnCalendar -> 0 9 * * MON,TUE,WED,THU,FRI
 ./goblin convert --from systemd weekly              # shorthand -> 0 0 * * MON
+./goblin convert --from k8s "@daily"                # CronJob macro -> 0 0 * * *
+./goblin convert --from k8s "@reboot"               # honest error: k8s has no boot event
 
 ./goblin lint /etc/crontab              # lint a crontab file
 crontab -l | ./goblin lint -            # lint your own crontab via stdin
