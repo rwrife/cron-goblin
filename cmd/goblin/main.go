@@ -8,8 +8,9 @@
 // the goreleaser release pipeline that ships prebuilt binaries (the version is
 // stamped into main.version at release time). `stagger` spreads "thundering
 // herd" pile-ups (jobs sharing a minute) across a window. `convert` translates
-// schedules from other dialects (Quartz today) into standard 5-field cron. See
-// PLAN.md for the roadmap.
+// schedules from other dialects (Quartz today) into standard 5-field cron.
+// `diff` compares two schedules' upcoming fire times so you can see what shifts
+// before committing a crontab edit. See PLAN.md for the roadmap.
 package main
 
 import (
@@ -119,6 +120,7 @@ func newRootCmd(version string) *cobra.Command {
 	cmd.AddCommand(newStaggerCmd())
 	cmd.AddCommand(newFromCmd())
 	cmd.AddCommand(newConvertCmd())
+	cmd.AddCommand(newDiffCmd())
 	cmd.AddCommand(newDoctorCmd())
 	cmd.AddCommand(newCompletionCmd(cmd))
 
