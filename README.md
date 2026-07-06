@@ -27,6 +27,13 @@ every-minute loops, and expressions that never fire.
   ✅ *available now*
 - **`goblin next "<expr>" -n 20`** — the next N fire times in your timezone
   (`--tz`, `--json`); reports expressions that never fire. ✅ *available now*
+- **`goblin diff "<old>" "<new>"`** — before you commit a crontab edit, see
+  exactly what shifts: line up the upcoming runs of two schedules and mark which
+  ones are **added** (`+`), **removed** (`-`), or **unchanged** (`=`). Compare a
+  fixed number of upcoming runs (`-n`) or everything inside a time window
+  (`--window 7d`, `--window 48h`); identical schedules are called out as a
+  no-op. `--tz`, `--json` (with added/removed/unchanged buckets and a
+  `summary.identical` flag for review tooling/agents). ✅ *available now*
 - **`goblin lint <crontab>`** — reads a whole crontab (file or stdin) and flags
   dead expressions, too-frequent jobs, same-instant collisions between jobs, and
   (with `--tz`) schedules that land in a daylight-saving gap/overlap
@@ -119,9 +126,10 @@ Prebuilt binaries for Linux, macOS, and Windows ship on every tagged release
 That's the v0.1 milestone arc complete. See
 [`PLAN.md`](./PLAN.md) for the roadmap and the v0.2+ backlog (the DST danger
 report has since landed in `goblin lint --tz`, the thundering-herd
-auto-stagger in `goblin stagger`, and dialect translation now covers Quartz,
-systemd `OnCalendar`, and Kubernetes CronJob schedules in `goblin convert`;
-richer dialect coverage, `goblin diff`, and the rest remain).
+auto-stagger in `goblin stagger`, dialect translation now covers Quartz,
+systemd `OnCalendar`, and Kubernetes CronJob schedules in `goblin convert`,
+and `goblin diff` shows how fire times shift between two schedules; richer
+dialect coverage and the rest remain).
 
 ## Install
 
@@ -182,6 +190,11 @@ go build -o goblin ./cmd/goblin
 ./goblin next --tz America/New_York "0 9 * * 1-5"  # 9am weekdays, New York time
 ./goblin next --json "0 0 13 * 5"             # machine-readable: fires the 13th OR any Friday
 ./goblin next "0 0 30 2 *"                    # "never fires" — February 30th doesn't exist
+
+./goblin diff "0 9 * * *" "30 9 * * *"         # what shifts if 9:00 -> 9:30 daily (+/-/= timeline)
+./goblin diff -n 20 "*/15 * * * *" "*/30 * * * *"  # compare the next 20 runs of each
+./goblin diff --window 7d "0 9 * * *" "0 8 * * *"  # compare every run in the next 7 days
+./goblin diff --json "0 0 * * *" "0 0 * * 1-5" # machine-readable diff for review tooling/agents
 
 ./goblin explain --json "0 0 13 * 5"   # machine-readable summary for scripts/agents
 ./goblin explain --quiet "30 6 * * 1-5" # no goblin grumbling on stderr
