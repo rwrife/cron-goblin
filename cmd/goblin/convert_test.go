@@ -305,3 +305,137 @@ func TestConvertSystemdLossyRefusalHasHint(t *testing.T) {
 		t.Errorf("expected a hint explaining the lossy refusal, got: %q", stderr)
 	}
 }
+
+// TestConvertToQuartz exercises the reverse direction end to end: standard cron
+// in, Quartz out. The 6-field Quartz spelling must land as the first stdout line.
+func TestConvertToQuartz(t *testing.T) {
+	stdout, stderr, err := runConvert(t, "--quiet", "--from", "cron", "--to", "quartz", "0 9 * * MON-FRI")
+	if err != nil {
+		t.Fatalf("Execute() error: %v", err)
+	}
+	first := strings.SplitN(strings.TrimSpace(stdout), "\n", 2)[0]
+	if first != "0 0 9 ? * MON-FRI" {
+		t.Errorf("cron->quartz = %q, want %q", first, "0 0 9 ? * MON-FRI")
+	}
+	if strings.TrimSpace(stderr) != "" {
+		t.Errorf("--quiet should silence stderr, got: %q", stderr)
+	}
+}
+
+// TestConvertToQuartzNumericWeekdayShift confirms the weekday renumbering runs
+// the correct way for the reverse direction: cron 1-5 (MON-FRI) -> Quartz 2-6.
+func TestConvertToQuartzNumericWeekdayShift(t *testing.T) {
+	stdout, _, err := runConvert(t, "--quiet", "--from", "cron", "--to", "quartz", "0 9 * * 1-5")
+	if err != nil {
+		t.Fatalf("Execute() error: %v", err)
+	}
+	first := strings.SplitN(strings.TrimSpace(stdout), "\n", 2)[0]
+	if first != "0 0 9 ? * 2-6" {
+		t.Errorf("weekday shift = %q, want %q", first, "0 0 9 ? * 2-6")
+	}
+}
+
+// TestConvertToQuartzJSON checks the machine-readable shape for a target other
+// than cron: `to` must report the real target and `result` the Quartz spelling,
+// while `cron` still carries the canonical 5-field form.
+func TestConvertToQuartzJSON(t *testing.T) {
+	stdout, _, err := runConvert(t, "--quiet", "--json", "--from", "cron", "--to", "quartz", "30 2 * * *")
+	if err != nil {
+		t.Fatalf("Execute() error: %v", err)
+	}
+	var payload struct {
+		From   string `json:"from"`
+		To     string `json:"to"`
+		Source string `json:"source"`
+		Result string `json:"result"`
+		Cron   string `json:"cron"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, stdout)
+	}
+	if payload.From != "cron" {
+		t.Errorf("from = %q, want cron", payload.From)
+	}
+	if payload.To != "quartz" {
+		t.Errorf("to = %q, want quartz", payload.To)
+	}
+	if payload.Result != "0 30 2 * * ?" {
+		t.Errorf("result = %q, want %q", payload.Result, "0 30 2 * * ?")
+	}
+	if payload.Cron != "30 2 * * *" {
+		t.Errorf("cron = %q, want canonical %q", payload.Cron, "30 2 * * *")
+	}
+}
+
+// TestConvertToQuartzBothDayFieldsRefused verifies the CLI surfaces the lossy
+// refusal (with hint) for the one shape Quartz cannot express: a cron pinning
+// both day-of-month and day-of-week.
+func TestConvertToQuartzBothDayFieldsRefused(t *testing.T) {
+	_, stderr, err := runConvert(t, "--from", "cron", "--to", "quartz", "0 9 15 * 1-5")
+	if err == nil {
+		t.Fatal("expected a refusal converting a both-day-fields cron to Quartz")
+	}
+	if !strings.Contains(stderr, "error:") {
+		t.Errorf("expected an error line on stderr, got: %q", stderr)
+	}
+	if !strings.Contains(stderr, "hint:") {
+		t.Errorf("expected a lossy hint on stderr, got: %q", stderr)
+	}
+}
+
+// TestConvertToK8sPassthrough confirms a plain schedule converts to k8s as
+// itself (a CronJob schedule is standard cron), normalized.
+func TestConvertToK8sPassthrough(t *testing.T) {
+	stdout, _, err := runConvert(t, "--quiet", "--from", "cron", "--to", "k8s", "*/5   *  * * *")
+	if err != nil {
+		t.Fatalf("Execute() error: %v", err)
+	}
+	first := strings.SplitN(strings.TrimSpace(stdout), "\n", 2)[0]
+	if first != "*/5 * * * *" {
+		t.Errorf("cron->k8s = %q, want normalized %q", first, "*/5 * * * *")
+	}
+}
+
+// TestConvertToK8sMacros confirms --k8s-macros collapses a canonical schedule to
+// the `@`-macro form a CronJob also accepts.
+func TestConvertToK8sMacros(t *testing.T) {
+	stdout, _, err := runConvert(t, "--quiet", "--from", "cron", "--to", "k8s", "--k8s-macros", "0 0 * * *")
+	if err != nil {
+		t.Fatalf("Execute() error: %v", err)
+	}
+	first := strings.SplitN(strings.TrimSpace(stdout), "\n", 2)[0]
+	if first != "@daily" {
+		t.Errorf("cron->k8s --k8s-macros = %q, want %q", first, "@daily")
+	}
+}
+
+// TestConvertQuartzRoundTripViaCLI drives the full loop through the command:
+// cron -> quartz then quartz -> cron must return the original expression.
+func TestConvertQuartzRoundTripViaCLI(t *testing.T) {
+	stdout, _, err := runConvert(t, "--quiet", "--from", "cron", "--to", "quartz", "0 9 * * 1-5")
+	if err != nil {
+		t.Fatalf("cron->quartz Execute() error: %v", err)
+	}
+	quartz := strings.SplitN(strings.TrimSpace(stdout), "\n", 2)[0]
+
+	stdout2, _, err := runConvert(t, "--quiet", "--from", "quartz", "--to", "cron", quartz)
+	if err != nil {
+		t.Fatalf("quartz->cron Execute() error: %v", err)
+	}
+	back := strings.SplitN(strings.TrimSpace(stdout2), "\n", 2)[0]
+	if back != "0 9 * * 1-5" {
+		t.Errorf("CLI round-trip: %q -> %q -> %q, want original %q", "0 9 * * 1-5", quartz, back, "0 9 * * 1-5")
+	}
+}
+
+// TestConvertToSystemdUnsupported confirms systemd is still refused as a target
+// (it has no single obvious serialization yet) with a clear diagnostic.
+func TestConvertToSystemdUnsupported(t *testing.T) {
+	_, stderr, err := runConvert(t, "--quiet", "--from", "cron", "--to", "systemd", "0 9 * * *")
+	if err == nil {
+		t.Fatal("expected an error for --to systemd")
+	}
+	if !strings.Contains(stderr, "error:") {
+		t.Errorf("expected a diagnostic on stderr, got: %q", stderr)
+	}
+}
