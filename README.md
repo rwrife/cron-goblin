@@ -34,6 +34,14 @@ every-minute loops, and expressions that never fire.
   (`--window 7d`, `--window 48h`); identical schedules are called out as a
   no-op. `--tz`, `--json` (with added/removed/unchanged buckets and a
   `summary.identical` flag for review tooling/agents). ✅ *available now*
+- **`goblin export "<cron>"`** — dump the schedule's next N fire times to a
+  standards-compliant iCalendar (`.ics`) file, so you can import it into Google
+  Calendar, Apple Calendar, or Outlook and eyeball a whole month of a job at a
+  glance. Fire times are computed in the chosen zone (`--tz`) and serialized as
+  UTC for unambiguous, universal import; events are one-minute point-in-time by
+  default or `--duration`-long. Streams to stdout (so it pipes) or `-o file.ics`;
+  `--summary` overrides the auto title, and a never-fires expression yields an
+  empty-but-valid calendar. ✅ *available now*
 - **`goblin lint <crontab>`** — reads a whole crontab (file or stdin) and flags
   dead expressions, too-frequent jobs, same-instant collisions between jobs, and
   (with `--tz`) schedules that land in a daylight-saving gap/overlap
@@ -202,6 +210,10 @@ go build -o goblin ./cmd/goblin
 ./goblin diff -n 20 "*/15 * * * *" "*/30 * * * *"  # compare the next 20 runs of each
 ./goblin diff --window 7d "0 9 * * *" "0 8 * * *"  # compare every run in the next 7 days
 ./goblin diff --json "0 0 * * *" "0 0 * * 1-5" # machine-readable diff for review tooling/agents
+
+./goblin export "0 9 * * 1-5" -n 20 > standup.ics   # next 20 runs as an .ics calendar (stdout)
+./goblin export --tz America/New_York -o backup.ics "30 2 * * 0"  # write a file, New York time
+./goblin export --duration 15m --summary "cache warm" "*/15 * * * *"  # 15-min events, custom title
 
 ./goblin explain --json "0 0 13 * 5"   # machine-readable summary for scripts/agents
 ./goblin explain --quiet "30 6 * * 1-5" # no goblin grumbling on stderr
