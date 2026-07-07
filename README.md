@@ -48,17 +48,23 @@ every-minute loops, and expressions that never fire.
   expression. Deterministic and fully offline (a hand-rolled rule grammar, no
   LLM, no network); `--json` for agents. ✅ *available now*
 - **`goblin convert --from quartz "0 0 9 ? * MON-FRI"`** — translate a schedule
-  from another dialect into standard 5-field cron. Handles Quartz's seconds
-  field, `?` marker, optional year, and 1-7 (SUN-SAT) weekday numbering, plus
+  between dialects (into, and out of, standard 5-field cron). Handles Quartz's
+  seconds field, `?` marker, optional year, and 1-7 (SUN-SAT) weekday
+  numbering, plus
   systemd `OnCalendar` timers (`--from systemd "Mon..Fri 09:00"`, including the
   `daily`/`weekly`/`monthly`/`quarterly`/`yearly` shorthands). `--from k8s`
   validates a Kubernetes CronJob schedule: it expands the robfig/cron `@`-macros
   a CronJob accepts (`@daily`, `@hourly`, `@weekly`, ...), passes plain 5-field
   cron through, and refuses schedules the apiserver rejects — vixie-only
   `@reboot` and Quartz specials pasted in from Java — pointing you at the right
-  fix. Only lossless conversions succeed; sub-minute precision, a specific year,
-  Quartz's `L`/`W`/`#`, and systemd's `~` are refused with a specific error
-  instead of a silent mistranslation. `--json` for agents. ✅ *available now*
+  fix. The translation runs both ways: `--to quartz` turns a plain crontab line
+  back into a 6-field Quartz spec (seconds prepended, `?` in the unused day
+  field, weekdays renumbered), and `--to k8s` (with `--k8s-macros`) emits a
+  Kubernetes CronJob schedule. Only lossless conversions succeed; sub-minute
+  precision, a specific year, Quartz's `L`/`W`/`#`, systemd's `~`, and a cron
+  that pins both day-of-month and day-of-week (which Quartz can't express) are
+  refused with a specific error instead of a silent mistranslation. `--json` for
+  agents. ✅ *available now*
 - **`goblin doctor`** — lint the crontab you actually have installed: reads it
   via `crontab -l` and runs the same rules as `goblin lint` (`--json`, `--ci`,
   `--user`). A user with no crontab is reported calmly and exits zero.
@@ -127,7 +133,8 @@ That's the v0.1 milestone arc complete. See
 [`PLAN.md`](./PLAN.md) for the roadmap and the v0.2+ backlog (the DST danger
 report has since landed in `goblin lint --tz`, the thundering-herd
 auto-stagger in `goblin stagger`, dialect translation now covers Quartz,
-systemd `OnCalendar`, and Kubernetes CronJob schedules in `goblin convert`,
+systemd `OnCalendar`, and Kubernetes CronJob schedules in `goblin convert`
+(both directions — `--from` and `--to` — for Quartz and k8s),
 and `goblin diff` shows how fire times shift between two schedules; richer
 dialect coverage and the rest remain).
 
@@ -206,6 +213,8 @@ go build -o goblin ./cmd/goblin
 
 ./goblin convert --from quartz "0 0 9 ? * MON-FRI"  # Quartz -> 0 9 * * MON-FRI
 ./goblin convert --from quartz "0 0 9 ? * 2-6"      # 2-6 (SUN-SAT) -> 1-5 weekdays
+./goblin convert --from cron --to quartz "0 9 * * MON-FRI" # reverse -> 0 0 9 ? * MON-FRI
+./goblin convert --from cron --to k8s --k8s-macros "0 0 * * *" # cron -> @daily
 ./goblin convert --from quartz --json "0 30 2 * * ?" # machine-readable result
 ./goblin convert --from quartz "30 0 12 * * ?"      # honest error: cron has no seconds
 ./goblin convert --from systemd "Mon..Fri 09:00"    # OnCalendar -> 0 9 * * MON,TUE,WED,THU,FRI

@@ -33,14 +33,15 @@ import (
 
 // convertJSON is the machine-readable shape emitted by `convert --json`. It is
 // deliberately small and stable: feed in a source expression + dialect, get back
-// the standard-cron line (plus an English sanity-check and next runs) without
+// the converted line (plus an English sanity-check and next runs) without
 // scraping prose. On a lossy/impossible conversion the command errors out
-// instead, so a successful JSON object always carries a usable Cron string.
+// instead, so a successful JSON object always carries a usable Result string.
 type convertJSON struct {
 	From       string   `json:"from"`        // source dialect name
-	To         string   `json:"to"`          // target dialect name (always "cron" today)
+	To         string   `json:"to"`          // target dialect name (cron, quartz, or k8s)
 	Source     string   `json:"source"`      // the original expression
-	Cron       string   `json:"cron"`        // the converted 5-field cron
+	Result     string   `json:"result"`      // the converted expression, in the target dialect
+	Cron       string   `json:"cron"`        // the canonical 5-field cron the result is built from
 	English    string   `json:"english"`     // plain-English readback of the result
 	NextRuns   []string `json:"next_runs"`   // ISO fire times (local TZ)
 	NeverFires bool     `json:"never_fires"` // true when the result never fires
@@ -49,19 +50,20 @@ type convertJSON struct {
 // newConvertCmd builds the `convert` subcommand.
 func newConvertCmd() *cobra.Command {
 	var (
-		from   string
-		to     string
-		asJSON bool
-		count  int
-		quiet  bool
+		from      string
+		to        string
+		asJSON    bool
+		count     int
+		quiet     bool
+		k8sMacros bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "convert --from <dialect> <expression>",
 		Short: "Convert a cron schedule from another dialect into standard cron",
-		Long: "Translate a cron schedule written in another dialect into a standard\n" +
-			"5-field cron expression. Deterministic and fully offline.\n\n" +
-			"Supported source dialects:\n" +
+		Long: "Translate a cron schedule between dialects. Deterministic and fully\n" +
+			"offline.\n\n" +
+			"Supported source dialects (--from):\n" +
 			"  quartz  6/7-field Java Quartz, with `?`, 1-7 SUN-SAT weekdays,\n" +
 			"          and an optional year.\n" +
 			"  systemd systemd.timer OnCalendar (DayOfWeek Y-M-D H:M:S), plus the\n" +
@@ -70,18 +72,26 @@ func newConvertCmd() *cobra.Command {
 			"          `@`-macros (@daily, @hourly, @weekly, ...). Validates that a\n" +
 			"          manifest schedule is one the apiserver will accept, refusing\n" +
 			"          vixie-only @reboot and pasted-in Quartz specials.\n" +
-			"The target is standard cron (`--to cron`, the default).\n\n" +
-			"Only lossless conversions succeed. Constructs standard cron cannot\n" +
-			"express — sub-minute (seconds) precision, a specific year, Quartz's\n" +
-			"`L`/`W`/`#` specials, and systemd's `~` (days-from-month-end) — are\n" +
-			"refused with a specific error rather than silently mistranslated.\n\n" +
+			"  cron    standard 5-field cron (the default; useful with --to quartz).\n\n" +
+			"Supported target dialects (--to, default cron):\n" +
+			"  cron    standard 5-field cron.\n" +
+			"  quartz  6-field Quartz (seconds prepended, `?` in the unused day\n" +
+			"          field, weekdays renumbered 1-7). Refuses the one shape Quartz\n" +
+			"          can't express: a cron that pins both day-of-month and day-of-week.\n" +
+			"  k8s     a Kubernetes CronJob schedule (5-field cron; add --k8s-macros\n" +
+			"          to collapse canonical forms to @daily/@hourly/... ).\n\n" +
+			"Only lossless conversions succeed. Constructs the target cannot express\n" +
+			"— sub-minute (seconds) precision, a specific year, Quartz's `L`/`W`/`#`,\n" +
+			"systemd's `~`, or a both-day-fields cron into Quartz — are refused with a\n" +
+			"specific error rather than silently mistranslated.\n\n" +
 			"Pass --json for a machine-readable result an agent can consume.",
 		Example: "  goblin convert --from quartz \"0 0 9 ? * MON-FRI\"\n" +
 			"  goblin convert --from quartz \"0 30 2 * * ?\"\n" +
+			"  goblin convert --from cron --to quartz \"0 9 * * MON-FRI\"\n" +
 			"  goblin convert --from systemd \"Mon..Fri 09:00\"\n" +
 			"  goblin convert --from systemd \"*-*-01 00:00\"\n" +
 			"  goblin convert --from k8s \"@daily\"\n" +
-			"  goblin convert --from k8s \"*/5 * * * *\"\n" +
+			"  goblin convert --from cron --to k8s --k8s-macros \"0 0 * * *\"\n" +
 			"  goblin convert --from systemd --json weekly",
 		// Accept the expression as one quoted arg, or several bare words we join,
 		// so `goblin convert --from quartz 0 0 9 ? * MON-FRI` works unquoted too.
@@ -99,9 +109,10 @@ func newConvertCmd() *cobra.Command {
 				fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", err)
 				return err
 			}
-			// The only target this slice can produce is standard 5-field cron.
-			if dstDialect != dialect.Cron && dstDialect != dialect.K8s {
-				err := fmt.Errorf("converting to %q is not supported yet (target must be cron)", to)
+			// Supported targets: standard cron, Quartz, and k8s. systemd output is
+			// not implemented yet (its richer grammar has no single obvious form).
+			if dstDialect == dialect.Systemd {
+				err := fmt.Errorf("converting to %q is not supported yet (targets: cron, quartz, k8s)", to)
 				fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", err)
 				return err
 			}
@@ -139,11 +150,29 @@ func newConvertCmd() *cobra.Command {
 				isoRuns[i] = t.Format(time.RFC3339)
 			}
 
+			// Serialize the normalized cron into the requested target dialect. The
+			// English readback and next-run preview above come from the canonical
+			// Schedule, so they stay correct regardless of how the result is spelled.
+			resultExpr, err := renderToDialect(dstDialect, sched.Raw, k8sMacros)
+			if err != nil {
+				if !quiet {
+					fmt.Fprintln(cmd.ErrOrStderr(), goblin.Line(source))
+				}
+				fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", err)
+				var ce *dialect.ConvertError
+				if errors.As(err, &ce) && ce.Lossy {
+					fmt.Fprintln(cmd.ErrOrStderr(),
+						"hint: this schedule has no lossless form in the target dialect; keep it in the dialect that can express it.")
+				}
+				return err
+			}
+
 			if asJSON {
 				payload := convertJSON{
 					From:       string(srcDialect),
-					To:         string(dialect.Cron),
+					To:         string(dstDialect),
 					Source:     source,
+					Result:     resultExpr,
 					Cron:       sched.Raw,
 					English:    readback,
 					NextRuns:   isoRuns,
@@ -154,13 +183,13 @@ func newConvertCmd() *cobra.Command {
 				return enc.Encode(payload)
 			}
 
-			// Human output: the converted cron line is the star and lands on the
-			// first stdout line alone, so it's trivially pipeable; supporting
-			// detail follows as comments, persona goes to stderr.
+			// Human output: the converted line is the star and lands on the first
+			// stdout line alone, so it's trivially pipeable; supporting detail follows
+			// as comments, persona goes to stderr.
 			if !quiet {
 				fmt.Fprintln(cmd.ErrOrStderr(), goblin.Line(source))
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), sched.Raw)
+			fmt.Fprintln(cmd.OutOrStdout(), resultExpr)
 			fmt.Fprintf(cmd.OutOrStdout(), "# %s\n", readback)
 			if never {
 				fmt.Fprintln(cmd.OutOrStdout(),
@@ -175,10 +204,11 @@ func newConvertCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&from, "from", "", "source dialect to convert from (quartz, systemd, k8s)")
-	cmd.Flags().StringVar(&to, "to", "cron", "target dialect (cron)")
+	cmd.Flags().StringVar(&to, "to", "cron", "target dialect (cron, quartz, k8s)")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit a machine-readable JSON result")
 	cmd.Flags().IntVarP(&count, "count", "n", 1, "how many upcoming runs to compute for the preview")
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "silence the goblin's grumbling (stderr persona)")
+	cmd.Flags().BoolVar(&k8sMacros, "k8s-macros", false, "with --to k8s, collapse canonical schedules to @daily/@hourly/... macros")
 	_ = cmd.MarkFlagRequired("from")
 
 	return cmd
@@ -209,5 +239,27 @@ func convertToCron(src dialect.Dialect, expr string) (string, error) {
 		return dialect.FromSystemd(expr)
 	default:
 		return "", fmt.Errorf("converting from %q is not supported", src)
+	}
+}
+
+// renderToDialect serializes a normalized 5-field cron expression into the
+// requested target dialect. It is the reverse-direction counterpart of
+// convertToCron: the source is always canonical standard cron (produced and
+// validated upstream), and this decides how the result is spelled.
+//
+// Cron is returned as-is. Quartz gains its seconds field and `?`/weekday
+// renumbering via dialect.ToQuartz (which refuses the one both-day-fields shape
+// Quartz cannot express). K8s is standard cron, optionally collapsed to an
+// `@`-macro when the caller passed --k8s-macros.
+func renderToDialect(dst dialect.Dialect, cron5 string, k8sMacros bool) (string, error) {
+	switch dst {
+	case dialect.Cron:
+		return cron5, nil
+	case dialect.Quartz:
+		return dialect.ToQuartz(cron5)
+	case dialect.K8s:
+		return dialect.ToK8s(cron5, k8sMacros)
+	default:
+		return "", fmt.Errorf("converting to %q is not supported", dst)
 	}
 }
