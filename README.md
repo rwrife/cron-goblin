@@ -42,6 +42,14 @@ every-minute loops, and expressions that never fire.
   default or `--duration`-long. Streams to stdout (so it pipes) or `-o file.ics`;
   `--summary` overrides the auto title, and a never-fires expression yields an
   empty-but-valid calendar. ✅ *available now*
+- **`goblin watch [crontab]`** — a tiny always-on panel: read one or many
+  schedules (a crontab file, stdin, or a single `--expr`) and show a
+  **live-updating countdown to each job's next fire**, re-sorting so the soonest
+  is on top. It's the "is my 3am job about to go off?" glance — the runtime
+  *feel* without ever executing anything. Redraws in place every second
+  (`--interval`); `--tz` picks the display zone; jobs that can never fire show as
+  `never` and sink to the bottom; `--once` prints a single frame and exits (the
+  script/CI-friendly path). ✅ *available now*
 - **`goblin lint <crontab>`** — reads a whole crontab (file or stdin) and flags
   dead expressions, too-frequent jobs, same-instant collisions between jobs, and
   (with `--tz`) schedules that land in a daylight-saving gap/overlap
@@ -143,8 +151,10 @@ report has since landed in `goblin lint --tz`, the thundering-herd
 auto-stagger in `goblin stagger`, dialect translation now covers Quartz,
 systemd `OnCalendar`, and Kubernetes CronJob schedules in `goblin convert`
 (both directions — `--from` and `--to` — for Quartz and k8s),
-and `goblin diff` shows how fire times shift between two schedules; richer
-dialect coverage and the rest remain).
+`goblin diff` shows how fire times shift between two schedules, the calendar
+export lands in `goblin export` (next fire times to an `.ics`), and the watch
+mode lands in `goblin watch` (a live countdown to the next fire across jobs);
+richer dialect coverage and the rest remain).
 
 ## Install
 
@@ -214,6 +224,11 @@ go build -o goblin ./cmd/goblin
 ./goblin export "0 9 * * 1-5" -n 20 > standup.ics   # next 20 runs as an .ics calendar (stdout)
 ./goblin export --tz America/New_York -o backup.ics "30 2 * * 0"  # write a file, New York time
 ./goblin export --duration 15m --summary "cache warm" "*/15 * * * *"  # 15-min events, custom title
+
+./goblin watch --expr "*/5 * * * *"            # live countdown to the next fire (Ctrl-C to exit)
+crontab -l | ./goblin watch                    # watch your whole crontab, soonest job on top
+./goblin watch --tz America/New_York crontab.txt   # countdown in New York wall-clock time
+./goblin watch --once --expr "0 9 * * 1-5"     # print one frame and exit (script/CI-friendly)
 
 ./goblin explain --json "0 0 13 * 5"   # machine-readable summary for scripts/agents
 ./goblin explain --quiet "30 6 * * 1-5" # no goblin grumbling on stderr

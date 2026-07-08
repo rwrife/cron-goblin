@@ -10,7 +10,9 @@
 // herd" pile-ups (jobs sharing a minute) across a window. `convert` translates
 // schedules from other dialects (Quartz today) into standard 5-field cron.
 // `diff` compares two schedules' upcoming fire times so you can see what shifts
-// before committing a crontab edit. See PLAN.md for the roadmap.
+// before committing a crontab edit. `watch` shows a live countdown to each job's
+// next fire across a whole crontab, re-sorting so the soonest is on top. See
+// PLAN.md for the roadmap.
 package main
 
 import (
@@ -122,6 +124,7 @@ func newRootCmd(version string) *cobra.Command {
 	cmd.AddCommand(newConvertCmd())
 	cmd.AddCommand(newDiffCmd())
 	cmd.AddCommand(newExportCmd())
+	cmd.AddCommand(newWatchCmd())
 	cmd.AddCommand(newDoctorCmd())
 	cmd.AddCommand(newCompletionCmd(cmd))
 
