@@ -54,6 +54,15 @@ every-minute loops, and expressions that never fire.
   dead expressions, too-frequent jobs, same-instant collisions between jobs, and
   (with `--tz`) schedules that land in a daylight-saving gap/overlap
   (`--tz`, `--json`, `--ci`). ✅ *available now*
+- **`goblin blame <crontab>`** — annotate a crontab inline, git-blame style:
+  read a crontab (file or stdin) and print it back with each schedule line
+  echoed unchanged plus a trailing `# <english> · next: <time>` comment, so you
+  can eyeball a whole crontab and instantly see what each cryptic line does and
+  when it next runs. Comments and blank lines are preserved; dead expressions
+  render `next: never`; unparseable lines pass through with a note. Where `lint`
+  lists *problems*, `blame` explains *everything* — the readable "what is this
+  crontab even doing" view. `--tz` picks the next-fire zone, `--json` emits a
+  stable per-line array (`{line, raw, schedule, english, next, dead}`). ✅ *available now*
 - **`goblin stagger <crontab>`** — break up "thundering herds": when several
   jobs fire on the exact same minute (the classic `0 9 * * *` pile-up), spread
   them deterministically across a window (`--max-spread`) so they stop
@@ -253,6 +262,10 @@ crontab -l | ./goblin watch                    # watch your whole crontab, soone
 crontab -l | ./goblin lint -            # lint your own crontab via stdin
 ./goblin lint --json crontab.txt        # stable JSON report for scripts/agents
 ./goblin lint --tz America/New_York crontab.txt   # also flag DST gap/overlap hazards
+
+./goblin blame crontab.txt              # annotate each line with meaning + next run
+crontab -l | ./goblin blame -           # blame your own crontab via stdin
+./goblin blame --tz America/New_York --json crontab.txt   # stable per-line JSON
 ./goblin lint --ci crontab.txt          # non-zero exit if any warning/error
 
 ./goblin stagger crontab.txt            # preview a spread for same-minute pile-ups
