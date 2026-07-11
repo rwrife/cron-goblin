@@ -69,6 +69,12 @@ every-minute loops, and expressions that never fire.
   stampeding the box together. Prints the rewritten crontab by default (a dry
   run); `--write --yes` overwrites the file in place — never without that
   explicit confirmation. `--json` for agents. ✅ *available now*
+- **`goblin gaps <crontab>`** — the inverse of `stagger`: across *all* jobs,
+  find the longest stretches of time where **nothing** fires over a look-ahead
+  window (`--days`, default 7). The safe slots for a heavy backup, a deploy
+  freeze, or a maintenance reboot. Also reports the single busiest minute and
+  how many jobs pile onto it (then go `stagger` them). `--top`, `--tz`, and
+  `--json` for agents. ✅ *available now*
 - **`goblin from "every weekday at 6:30pm"`** — plain English → a cron
   expression. Deterministic and fully offline (a hand-rolled rule grammar, no
   LLM, no network); `--json` for agents. ✅ *available now*
@@ -272,7 +278,29 @@ crontab -l | ./goblin blame -           # blame your own crontab via stdin
 ./goblin stagger --max-spread 30 crontab.txt   # spread each herd within 30 minutes
 ./goblin stagger --json crontab.txt     # machine-readable stagger plan for agents
 ./goblin stagger --write --yes crontab.txt     # rewrite the file in place (confirmed)
+```
 
+Find the quiet windows where it's safe to schedule something new:
+
+```bash
+./goblin gaps crontab.txt                 # top 5 quiet windows over the next 7 days
+crontab -l | ./goblin gaps -              # analyze your live crontab
+./goblin gaps --days 14 --top 10 crontab.txt   # wider window, more windows
+./goblin gaps --tz America/New_York crontab.txt  # quiet windows in NY wall-clock
+./goblin gaps --json crontab.txt          # machine-readable report for agents
+```
+
+Example output:
+
+```
+Quiet windows in crontab.txt (nothing fires), longest first:
+  1. Sun 02:14 → Sun 05:47   (3h33m)
+  2. Sat 22:03 → Sun 00:31   (2h28m)
+  3. Wed 13:10 → Wed 14:55   (1h45m)
+Busiest minute: Sun 00:00 (6 jobs)  ·  see `goblin stagger` to spread them.
+```
+
+```bash
 ./goblin doctor                         # lint the crontab you actually have installed
 ./goblin doctor --json                  # stable JSON report for scripts/agents
 ./goblin doctor --ci                    # non-zero exit if any warning/error
