@@ -67,6 +67,16 @@ func newDoctorCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			src := crontabSource(user)
 
+			// Project config (.goblinrc) can disable rules and enable CI mode
+			// as defaults, under explicit flags. --no-config bypasses it.
+			cfg, cerr := loadConfig(cmd, quiet)
+			if cerr != nil {
+				return cerr
+			}
+			if cfg.CIEnabled() {
+				ci = true
+			}
+
 			raw, err := crontabLoader(user)
 			if err != nil {
 				if errors.Is(err, errNoCrontab) {
@@ -86,7 +96,8 @@ func newDoctorCmd() *cobra.Command {
 				return err
 			}
 
-			report, err := lint.Lint(strings.NewReader(raw), nil)
+			rules := lint.FilterRules(lint.DefaultRules(), cfg.Lint.Disable)
+			report, err := lint.Lint(strings.NewReader(raw), rules)
 			if err != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "error: reading crontab: %v\n", err)
 				return err

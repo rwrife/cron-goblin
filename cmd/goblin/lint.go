@@ -77,6 +77,18 @@ func newLintCmd() *cobra.Command {
 				path = args[0]
 			}
 
+			// Project config (.goblinrc) supplies defaults *under* explicit
+			// flags: it can preset the timezone, disable rules, and turn on CI
+			// mode. --no-config (persistent) bypasses discovery entirely.
+			cfg, cerr := loadConfig(cmd, quiet)
+			if cerr != nil {
+				return cerr
+			}
+			tz = resolveTZ(tz, cmd.Flags().Changed("tz"), cfg)
+			if cfg.CIEnabled() {
+				ci = true
+			}
+
 			// Resolve the timezone up front so a bad --tz fails fast with the
 			// same goblin grumble as the other zone-aware commands. An empty
 			// --tz means "no DST analysis" (local would be ambiguous for a file
@@ -110,9 +122,11 @@ func newLintCmd() *cobra.Command {
 			// default-rule lint (UTC, no DST findings) for backward compatibility.
 			var report lint.Report
 			if loc != nil {
-				report, err = lint.LintWithLocation(reader, loc, time.Now())
+				rules := lint.FilterRules(lint.DefaultRulesTZ(loc, time.Now()), cfg.Lint.Disable)
+				report, err = lint.Lint(reader, rules)
 			} else {
-				report, err = lint.Lint(reader, nil)
+				rules := lint.FilterRules(lint.DefaultRules(), cfg.Lint.Disable)
+				report, err = lint.Lint(reader, rules)
 			}
 			if err != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "error: reading crontab: %v\n", err)
