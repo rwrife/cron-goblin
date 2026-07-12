@@ -121,6 +121,7 @@ func newRootCmd(version string) *cobra.Command {
 	cmd.AddCommand(newLintCmd())
 	cmd.AddCommand(newBlameCmd())
 	cmd.AddCommand(newStaggerCmd())
+	cmd.AddCommand(newGapsCmd())
 	cmd.AddCommand(newFromCmd())
 	cmd.AddCommand(newConvertCmd())
 	cmd.AddCommand(newDiffCmd())
