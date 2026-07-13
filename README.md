@@ -136,7 +136,10 @@ Prebuilt binaries for Linux, macOS, and Windows ship on every tagged release
   **DST-danger** rule (from the v0.2 backlog): jobs whose wall-clock time falls
   in a spring-forward gap are flagged as silently skipped (warning), and jobs in
   a fall-back overlap are noted as ambiguous (info). `--json` for a stable report
-  and `--ci` for a non-zero exit in pipelines.
+  and `--ci` for a non-zero exit in pipelines. Use `--ci-level {warning,error}`
+  to tune the failure bar (default `warning` fails on warnings+errors; `error`
+  fails only on errors). Setting `--ci-level` implies `--ci`; `.goblinrc` can
+  preset it via `[lint] ci_level`.
 - **M5 (TUI preview pane)** — done. Running `goblin` with no arguments in a
   terminal opens a live [bubbletea](https://github.com/charmbracelet/bubbletea)
   preview: an input box parses your expression as you type and three panels
@@ -279,6 +282,7 @@ crontab -l | ./goblin lint -            # lint your own crontab via stdin
 crontab -l | ./goblin blame -           # blame your own crontab via stdin
 ./goblin blame --tz America/New_York --json crontab.txt   # stable per-line JSON
 ./goblin lint --ci crontab.txt          # non-zero exit if any warning/error
+./goblin lint --ci-level error crontab.txt   # fail CI only on errors (warnings pass)
 
 ./goblin stagger crontab.txt            # preview a spread for same-minute pile-ups
 ./goblin stagger --max-spread 30 crontab.txt   # spread each herd within 30 minutes

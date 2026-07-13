@@ -57,6 +57,11 @@ type Lint struct {
 	// (equivalent to passing --ci). It is a pointer so callers can tell "unset"
 	// from an explicit "ci = false" if they ever need to; nil means unset.
 	CI *bool `toml:"ci"`
+
+	// CILevel sets the severity threshold at which CI mode fails: "warning"
+	// (fail on warnings or errors, the default) or "error" (fail only on
+	// errors). Empty means unset; the CLI layer applies the default.
+	CILevel string `toml:"ci_level"`
 }
 
 // Disabled reports whether the named rule code is in the Lint.Disable list.

@@ -47,10 +47,11 @@ type lintCountsJSON struct {
 // newLintCmd builds the `lint` subcommand.
 func newLintCmd() *cobra.Command {
 	var (
-		asJSON bool
-		ci     bool
-		quiet  bool
-		tz     string
+		asJSON  bool
+		ci      bool
+		ciLevel string
+		quiet   bool
+		tz      string
 	)
 
 	cmd := &cobra.Command{
@@ -87,6 +88,23 @@ func newLintCmd() *cobra.Command {
 			tz = resolveTZ(tz, cmd.Flags().Changed("tz"), cfg)
 			if cfg.CIEnabled() {
 				ci = true
+			}
+
+			// Setting --ci-level (or ci_level in config) implies CI gating: you
+			// asked for a threshold, so you clearly want the gate on.
+			if !cmd.Flags().Changed("ci-level") && cfg.Lint.CILevel != "" {
+				ciLevel = cfg.Lint.CILevel
+			}
+			if cmd.Flags().Changed("ci-level") || cfg.Lint.CILevel != "" {
+				ci = true
+			}
+			failLevel, err := parseCILevel(ciLevel)
+			if err != nil {
+				if !quiet {
+					fmt.Fprintln(cmd.ErrOrStderr(), goblin.Line(ciLevel))
+				}
+				fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", err)
+				return err
 			}
 
 			// Resolve the timezone up front so a bad --tz fails fast with the
@@ -134,7 +152,7 @@ func newLintCmd() *cobra.Command {
 			}
 
 			_, warnings, errs := report.Counts()
-			failing := ci && (warnings > 0 || errs > 0)
+			failing := ci && report.Worst() >= failLevel && (warnings > 0 || errs > 0)
 
 			if asJSON {
 				if err := writeLintJSON(cmd, src, report); err != nil {
@@ -158,6 +176,8 @@ func newLintCmd() *cobra.Command {
 
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit a stable machine-readable JSON report")
 	cmd.Flags().BoolVar(&ci, "ci", false, "exit non-zero when any warning or error is found")
+	cmd.Flags().StringVar(&ciLevel, "ci-level", "warning",
+		"severity threshold for --ci failure: 'warning' (warnings+errors) or 'error' (errors only); implies --ci")
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "silence the goblin's grumbling (stderr persona)")
 	cmd.Flags().StringVar(&tz, "tz", "",
 		"timezone for DST-hazard analysis (IANA name, e.g. America/New_York; off when unset)")
@@ -169,6 +189,20 @@ func newLintCmd() *cobra.Command {
 // the crontab has warnings or errors, so the process exits non-zero. The
 // message is suppressed by SilenceErrors; main.go maps the error to exit 1.
 var errCIThreshold = fmt.Errorf("lint found warnings or errors")
+
+// parseCILevel maps the --ci-level string to the minimum Severity that should
+// trip a non-zero exit. Empty defaults to "warning" (historical behavior).
+// Unknown values are rejected so a typo can't silently weaken CI gating.
+func parseCILevel(level string) (lint.Severity, error) {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "", "warning", "warn":
+		return lint.SeverityWarning, nil
+	case "error", "err":
+		return lint.SeverityError, nil
+	default:
+		return 0, fmt.Errorf("invalid --ci-level %q: want \"warning\" or \"error\"", level)
+	}
+}
 
 // openCrontab resolves the input source. An empty path or "-" means stdin; the
 // returned closer is nil in that case (we never close the shared stdin). For a
