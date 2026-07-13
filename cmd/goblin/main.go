@@ -44,10 +44,11 @@ func main() {
 // version and capture its output.
 func newRootCmd(version string) *cobra.Command {
 	var (
-		quiet   bool
-		tz      string
-		noColor bool
-		noTUI   bool
+		quiet    bool
+		tz       string
+		noColor  bool
+		noTUI    bool
+		noConfig bool
 	)
 
 	cmd := &cobra.Command{
@@ -100,6 +101,16 @@ func newRootCmd(version string) *cobra.Command {
 
 	cmd.PersistentFlags().BoolVar(&quiet, "quiet", false,
 		"silence the goblin's grumbling (stderr persona)")
+	cmd.PersistentFlags().BoolVar(&noConfig, "no-config", false,
+		"ignore any project .goblinrc (reproducible CI; skips config discovery)")
+	// Bind the persistent --no-config into the shared config state before any
+	// subcommand RunE resolves config. PersistentPreRun runs after flag parsing
+	// for the selected command, so rootConfig sees the final value.
+	cmd.PersistentPreRun = func(*cobra.Command, []string) {
+		// Fresh config state per invocation so repeated newRootCmd builds (in
+		// tests) don't share a memoized discovery result.
+		rootConfig = &configState{noConfig: noConfig}
+	}
 	cmd.Flags().StringVar(&tz, "tz", "",
 		"timezone for the live preview (IANA name, e.g. America/New_York; default: local)")
 	cmd.Flags().BoolVar(&noColor, "no-color", false,

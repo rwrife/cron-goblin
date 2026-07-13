@@ -100,6 +100,12 @@ every-minute loops, and expressions that never fire.
   via `crontab -l` and runs the same rules as `goblin lint` (`--json`, `--ci`,
   `--user`). A user with no crontab is reported calmly and exits zero.
   ✅ *available now*
+- **`.goblinrc` (project config)** — drop a `.goblinrc` (TOML) at your repo root
+  to pin a default `timezone` and a `[lint]` ruleset once, instead of every
+  teammate passing flags. Goblin walks up from the working directory to find
+  the nearest one. Precedence: CLI flag > `GOBLIN_TZ` > `.goblinrc` > built-in
+  default; `--no-config` skips discovery for reproducible CI.
+  ✅ *available now*
 - **`goblin completion <shell>`** — generate a tab-completion script for bash,
   zsh, fish, or PowerShell. Each subcommand's `--help` has the exact install
   line. ✅ *available now*
@@ -305,6 +311,8 @@ Busiest minute: Sun 00:00 (6 jobs)  ·  see `goblin stagger` to spread them.
 ./goblin doctor --json                  # stable JSON report for scripts/agents
 ./goblin doctor --ci                    # non-zero exit if any warning/error
 
+./goblin lint --no-config crontab.txt   # ignore any project .goblinrc (reproducible CI)
+
 ./goblin completion bash > /etc/bash_completion.d/goblin   # bash tab-completion
 ./goblin completion zsh  > "${fpath[1]}/_goblin"           # zsh
 ./goblin completion fish > ~/.config/fish/completions/goblin.fish  # fish
@@ -317,6 +325,39 @@ Fire times honor cron's classic day-of-month/day-of-week OR-rule and are
 computed against your chosen timezone's wall clock, so daylight-saving
 transitions are handled correctly (missing hours are skipped; repeated hours
 fire once).
+
+### Project config (`.goblinrc`)
+
+Pin per-project defaults so a repo doesn't rely on everyone passing the same
+flags. On startup, goblin walks up from the working directory to the nearest
+`.goblinrc` (TOML) and applies it *under* explicit flags.
+
+```toml
+timezone = "America/New_York"   # default zone for tz-aware commands
+
+[lint]
+disable = ["too-frequent"]      # this repo intentionally runs every-minute jobs
+ci = true                       # fail pipelines on warnings by default
+```
+
+Supported keys:
+
+- `timezone` — IANA name used when a command's `--tz` (and `GOBLIN_TZ`) is unset.
+- `[lint] disable` — list of rule codes to skip (`too-frequent`, `collision`,
+  `dead-expression`, `dst-danger`). Applies to `lint` and `doctor`.
+- `[lint] ci` — when `true`, `lint`/`doctor` exit non-zero on warnings/errors
+  by default (same as `--ci`).
+
+Precedence, highest first:
+
+1. Explicit CLI flag (e.g. `--tz`, `--ci`)
+2. Environment: `GOBLIN_TZ`
+3. `.goblinrc`
+4. Built-in default
+
+Use `--no-config` to skip discovery entirely (reproducible CI). Unknown keys
+are warned about (grumpily) but don't hard-fail; a malformed file reports the
+file and line instead of panicking.
 
 ## License
 

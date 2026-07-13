@@ -150,6 +150,32 @@ func (r Report) Counts() (info, warning, errors int) {
 	return
 }
 
+// FilterRules returns the rules whose Name() is not present in disable. The
+// order of the surviving rules is preserved. A nil/empty disable set returns
+// rules unchanged (a fresh slice). Unknown names in disable are ignored — the
+// CLI is responsible for warning about typos. This lets `.goblinrc`'s
+// `[lint] disable` opt a project out of specific rules (e.g. "too-frequent")
+// without the lint engine needing to know about config files.
+func FilterRules(rules []Rule, disable []string) []Rule {
+	if len(disable) == 0 {
+		out := make([]Rule, len(rules))
+		copy(out, rules)
+		return out
+	}
+	drop := make(map[string]bool, len(disable))
+	for _, d := range disable {
+		drop[d] = true
+	}
+	out := make([]Rule, 0, len(rules))
+	for _, r := range rules {
+		if drop[r.Name()] {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
 // Lint parses crontab text and runs the given rules over it. Passing a nil or
 // empty rules slice uses DefaultRules. Findings are returned sorted by first
 // line, then by descending severity, then by rule name, so output is stable
