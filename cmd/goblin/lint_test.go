@@ -134,6 +134,62 @@ func TestLintCICleanExitsZero(t *testing.T) {
 	}
 }
 
+// warnOnlyCrontab has a same-instant collision (warning) but no dead
+// expressions (error), so it exercises the --ci-level threshold.
+const warnOnlyCrontab = "0 3 * * * /bin/backup\n0 3 * * * /bin/logrotate\n"
+
+func TestLintCILevelWarningDefault(t *testing.T) {
+	// Default level is "warning": a warning-only crontab should fail CI.
+	path := writeTempCrontab(t, warnOnlyCrontab)
+	if _, _, err := runLint(t, "", "--quiet", "--ci", path); err == nil {
+		t.Fatal("default --ci should fail on a warning-only crontab")
+	}
+}
+
+func TestLintCILevelErrorPassesWarnings(t *testing.T) {
+	// --ci-level error: warnings should NOT fail CI.
+	path := writeTempCrontab(t, warnOnlyCrontab)
+	if _, _, err := runLint(t, "", "--quiet", "--ci-level", "error", path); err != nil {
+		t.Fatalf("--ci-level error should pass a warning-only crontab, got: %v", err)
+	}
+}
+
+func TestLintCILevelErrorFailsErrors(t *testing.T) {
+	// --ci-level error: an error-bearing crontab should still fail, and
+	// setting the level implies CI gating (no explicit --ci needed).
+	path := writeTempCrontab(t, sampleCrontab)
+	if _, _, err := runLint(t, "", "--quiet", "--ci-level", "error", path); err == nil {
+		t.Fatal("--ci-level error should fail on a crontab with a dead expression")
+	}
+}
+
+func TestLintCILevelImpliesCI(t *testing.T) {
+	// Passing --ci-level warning (without --ci) should still gate CI.
+	path := writeTempCrontab(t, warnOnlyCrontab)
+	if _, _, err := runLint(t, "", "--quiet", "--ci-level", "warning", path); err == nil {
+		t.Fatal("--ci-level warning should imply --ci and fail on warnings")
+	}
+}
+
+func TestLintCILevelInvalid(t *testing.T) {
+	path := writeTempCrontab(t, warnOnlyCrontab)
+	if _, _, err := runLint(t, "", "--quiet", "--ci-level", "bogus", path); err == nil {
+		t.Fatal("an invalid --ci-level should return an error")
+	}
+}
+
+func TestLintCILevelJSONPath(t *testing.T) {
+	// JSON output path also honors the level: warning-only + level error passes.
+	path := writeTempCrontab(t, warnOnlyCrontab)
+	if _, _, err := runLint(t, "", "--quiet", "--json", "--ci-level", "error", path); err != nil {
+		t.Fatalf("--json --ci-level error on warnings should pass, got: %v", err)
+	}
+	// And warning-level JSON fails on warnings.
+	if _, _, err := runLint(t, "", "--quiet", "--json", "--ci", path); err == nil {
+		t.Fatal("--json --ci should fail on a warning-only crontab")
+	}
+}
+
 func TestLintReadsStdin(t *testing.T) {
 	stdout, _, err := runLint(t, sampleCrontab, "--quiet", "-")
 	if err != nil {
