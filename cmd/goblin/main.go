@@ -128,6 +128,7 @@ func newRootCmd(version string) *cobra.Command {
 
 	// Wire up subcommands.
 	cmd.AddCommand(newExplainCmd())
+	cmd.AddCommand(newNarrateCmd())
 	cmd.AddCommand(newNextCmd())
 	cmd.AddCommand(newLintCmd())
 	cmd.AddCommand(newBlameCmd())

@@ -25,6 +25,12 @@ every-minute loops, and expressions that never fire.
 - **`goblin explain "<expr>"`** — plain-English description of a cron expression,
   now with a preview of the upcoming fire times (`--json` for scripts/agents).
   ✅ *available now*
+- **`goblin narrate "<expr>"`** — a warm, changelog-ready prose one-liner
+  describing the schedule (e.g. "This job runs at 18:30 on weekdays."). Unlike
+  `explain` (terse/structured), `narrate` is human prose you can paste into a
+  CHANGELOG or PR description; `--from`/`--to` narrates a schedule *change*
+  (cadence delta + next-run shift), pairing with `diff`. Deterministic and
+  offline (no LLM); `--json` returns `{sentence, ...}` for agents. ✅ *available now*
 - **`goblin next "<expr>" -n 20`** — the next N fire times in your timezone
   (`--tz`, `--json`); reports expressions that never fire. ✅ *available now*
 - **`goblin diff "<old>" "<new>"`** — before you commit a crontab edit, see
@@ -178,6 +184,8 @@ systemd `OnCalendar`, and Kubernetes CronJob schedules in `goblin convert`
 `goblin diff` shows how fire times shift between two schedules, the calendar
 export lands in `goblin export` (next fire times to an `.ics`), and the watch
 mode lands in `goblin watch` (a live countdown to the next fire across jobs);
+natural-language *out* lands in `goblin narrate` (a changelog-ready prose
+one-liner for a schedule, or a schedule change via `--from`/`--to`);
 richer dialect coverage and the rest remain).
 
 ## Install
