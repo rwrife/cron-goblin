@@ -59,7 +59,9 @@ every-minute loops, and expressions that never fire.
 - **`goblin lint <crontab>`** — reads a whole crontab (file or stdin) and flags
   dead expressions, too-frequent jobs, same-instant collisions between jobs, and
   (with `--tz`) schedules that land in a daylight-saving gap/overlap
-  (`--tz`, `--json`, `--ci`). ✅ *available now*
+  (`--tz`, `--json`, `--ci`). Also loads **pluggable, declarative rules** from a
+  rules directory so orgs can encode local scheduling policy without writing
+  code (`--rules-dir`, `--no-plugins`; see "Plugin lint rules" below). ✅ *available now*
 - **`goblin blame <crontab>`** — annotate a crontab inline, git-blame style:
   read a crontab (file or stdin) and print it back with each schedule line
   echoed unchanged plus a trailing `# <english> · next: <time>` comment, so you
@@ -366,6 +368,65 @@ Precedence, highest first:
 2. Environment: `GOBLIN_TZ`
 3. `.goblinrc`
 4. Built-in default
+
+### Plugin lint rules
+
+Beyond the built-in rules, `goblin lint` can load
+**declarative rules** you drop into a directory, so teams can encode local
+scheduling policy — "no jobs during the 02:00–04:00 backup window", "this label
+of job may not fire more than 4×/hour" — without shipping any code. Rules are
+*data*, not scripts: they can't execute anything, they run offline, and a
+malformed file fails loudly (naming the offending path) instead of being
+silently ignored.
+
+Discovery, when `--rules-dir` is not given and `--no-plugins` is off:
+
+1. `./.goblin/rules/` (project-local)
+2. `<user-config-dir>/goblin/rules/` (e.g. `~/.config/goblin/rules/`)
+
+Each `*.toml` file holds one or more `[[rule]]` tables. A job is flagged when it
+satisfies **every** condition present on the rule (logical AND). A rule with no
+conditions is rejected at load.
+
+```toml
+# .goblin/rules/policy.toml
+
+[[rule]]
+name     = "no-backup-window"
+severity = "error"                # info | warning | error (default: warning)
+message  = "jobs must not fire during the 02:00-04:00 backup window"
+forbid_hours = [2, 3]             # flag if the job ever fires in these hours
+
+[[rule]]
+name     = "batch-not-too-hot"
+severity = "warning"
+message  = "batch jobs may fire at most 4 times per hour — stagger them"
+max_per_hour = 4                  # flag if any single clock hour exceeds N fires
+
+[[rule]]
+name    = "sunday-freeze"
+message = "no scheduled work at the top of the hour on Sundays"
+fields  = { minute = "0", dow = "0" }   # exact cron-field text match
+```
+
+Condition keys:
+
+- `forbid_hours = [h, …]` — flag if any upcoming fire lands in one of these
+  hours (0–23).
+- `max_per_hour = N` — flag if the schedule fires more than `N` times in any
+  single clock hour.
+- `fields = { minute=…, hour=…, dom=…, month=…, dow=… }` — exact match on the
+  raw text of the named cron field(s). (`weekday`/`dayofweek` alias `dow`, etc.)
+
+Loaded rules merge with the built-ins and appear in `lint --json` findings under
+their own `name`, so scripts and agents can match on them. They also honor
+`[lint] disable` in `.goblinrc`, so a project can opt out of a plugin rule by
+name just like a built-in.
+
+```sh
+./goblin lint --rules-dir ./ops/goblin-rules crontab.txt   # explicit dir
+./goblin lint --no-plugins crontab.txt                     # built-ins only
+```
 
 Use `--no-config` to skip discovery entirely (reproducible CI). Unknown keys
 are warned about (grumpily) but don't hard-fail; a malformed file reports the

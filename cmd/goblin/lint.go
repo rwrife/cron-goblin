@@ -14,6 +14,7 @@ import (
 
 	"github.com/rwrife/cron-goblin/internal/goblin"
 	"github.com/rwrife/cron-goblin/internal/lint"
+	"github.com/rwrife/cron-goblin/internal/lintrules"
 	"github.com/spf13/cobra"
 )
 
@@ -47,11 +48,13 @@ type lintCountsJSON struct {
 // newLintCmd builds the `lint` subcommand.
 func newLintCmd() *cobra.Command {
 	var (
-		asJSON  bool
-		ci      bool
-		ciLevel string
-		quiet   bool
-		tz      string
+		asJSON    bool
+		ci        bool
+		ciLevel   string
+		quiet     bool
+		tz        string
+		rulesDir  string
+		noPlugins bool
 	)
 
 	cmd := &cobra.Command{
@@ -136,16 +139,39 @@ func newLintCmd() *cobra.Command {
 				defer closer.Close()
 			}
 
+			// Load user-authored declarative rules (plugins) unless disabled.
+			// Explicit --rules-dir overrides the documented default dirs. A
+			// malformed rule file fails loudly here, naming the offending path,
+			// rather than being silently ignored.
+			var pluginRules []lint.Rule
+			if !noPlugins {
+				if rulesDir != "" {
+					pluginRules, err = lintrules.LoadDir(rulesDir)
+				} else {
+					pluginRules, err = lintrules.LoadAll(lintrules.DefaultDirs())
+				}
+				if err != nil {
+					if !quiet {
+						fmt.Fprintln(cmd.ErrOrStderr(), goblin.Line(rulesDir))
+					}
+					fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", err)
+					return err
+				}
+			}
+
 			// With a timezone, run the DST-aware path; otherwise the plain
 			// default-rule lint (UTC, no DST findings) for backward compatibility.
+			// User plugin rules merge with the built-ins before the disable
+			// filter, so a project can also opt out of a plugin rule by name.
 			var report lint.Report
+			var base []lint.Rule
 			if loc != nil {
-				rules := lint.FilterRules(lint.DefaultRulesTZ(loc, time.Now()), cfg.Lint.Disable)
-				report, err = lint.Lint(reader, rules)
+				base = lint.DefaultRulesTZ(loc, time.Now())
 			} else {
-				rules := lint.FilterRules(lint.DefaultRules(), cfg.Lint.Disable)
-				report, err = lint.Lint(reader, rules)
+				base = lint.DefaultRules()
 			}
+			rules := lint.FilterRules(append(base, pluginRules...), cfg.Lint.Disable)
+			report, err = lint.Lint(reader, rules)
 			if err != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "error: reading crontab: %v\n", err)
 				return err
@@ -181,6 +207,10 @@ func newLintCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "silence the goblin's grumbling (stderr persona)")
 	cmd.Flags().StringVar(&tz, "tz", "",
 		"timezone for DST-hazard analysis (IANA name, e.g. America/New_York; off when unset)")
+	cmd.Flags().StringVar(&rulesDir, "rules-dir", "",
+		"directory of declarative *.toml lint rules (overrides the default discovery dirs)")
+	cmd.Flags().BoolVar(&noPlugins, "no-plugins", false,
+		"disable user-authored plugin rules (only run the built-in rule set)")
 
 	return cmd
 }

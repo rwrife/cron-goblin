@@ -305,3 +305,81 @@ func TestLintBadTZFailsFast(t *testing.T) {
 		t.Errorf("expected an unknown-timezone error on stderr, got: %q", stderr)
 	}
 }
+
+// writePluginRules writes a rules dir with one TOML file and returns the dir.
+func writePluginRules(t *testing.T, filename, content string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, filename), []byte(content), 0o600); err != nil {
+		t.Fatalf("write plugin rules: %v", err)
+	}
+	return dir
+}
+
+// TestLintRulesDirFinding checks that a user-authored declarative rule loaded
+// via --rules-dir merges with the built-ins and shows up (by its own name) in
+// the JSON findings.
+func TestLintRulesDirFinding(t *testing.T) {
+	cron := writeTempCrontab(t, "0 3 * * * /bin/backup\n")
+	rulesDir := writePluginRules(t, "policy.toml", `
+[[rule]]
+name = "no-backup-window"
+severity = "error"
+message = "no jobs during 02:00-04:00 backup window"
+forbid_hours = [2, 3]
+`)
+
+	stdout, _, err := runLint(t, "", "--quiet", "--json", "--rules-dir", rulesDir, cron)
+	if err != nil {
+		t.Fatalf("Execute() error: %v", err)
+	}
+	var report lintReportJSON
+	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
+		t.Fatalf("bad JSON: %v\n%s", err, stdout)
+	}
+	var found bool
+	for _, f := range report.Findings {
+		if f.Rule == "no-backup-window" {
+			found = true
+			if f.Severity != "error" {
+				t.Errorf("plugin finding severity = %q, want error", f.Severity)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("plugin rule finding not present in report: %+v", report.Findings)
+	}
+}
+
+// TestLintNoPluginsDisables ensures --no-plugins skips plugin discovery even
+// when --rules-dir would otherwise load a matching rule.
+func TestLintNoPluginsDisables(t *testing.T) {
+	cron := writeTempCrontab(t, "0 3 * * * /bin/backup\n")
+	rulesDir := writePluginRules(t, "policy.toml", `
+[[rule]]
+name = "no-backup-window"
+message = "no backup window"
+forbid_hours = [3]
+`)
+	stdout, _, err := runLint(t, "", "--quiet", "--json", "--no-plugins", "--rules-dir", rulesDir, cron)
+	if err != nil {
+		t.Fatalf("Execute() error: %v", err)
+	}
+	if strings.Contains(stdout, "no-backup-window") {
+		t.Errorf("--no-plugins should suppress plugin rules, got:\n%s", stdout)
+	}
+}
+
+// TestLintRulesDirMalformedFailsLoudly ensures a broken rule file aborts the
+// lint with an error naming the offending path.
+func TestLintRulesDirMalformedFailsLoudly(t *testing.T) {
+	cron := writeTempCrontab(t, "0 3 * * * /bin/backup\n")
+	rulesDir := writePluginRules(t, "broken.toml", "not valid = = [[[\n")
+	_, stderr, err := runLint(t, "", "--json", "--rules-dir", rulesDir, cron)
+	if err == nil {
+		t.Fatal("want error for malformed rule file, got nil")
+	}
+	if !strings.Contains(stderr, "broken.toml") {
+		t.Errorf("stderr should name the offending file, got:\n%s", stderr)
+	}
+}
