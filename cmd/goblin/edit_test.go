@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -12,6 +14,11 @@ import (
 // captures its streams. Stubs are restored after the test. It mirrors runLint /
 // runDoctor in the sibling test files.
 func runEdit(t *testing.T, editor func(path string) error, args ...string) (stdout, stderr string, installed *string, err error) {
+	t.Helper()
+	return runEditInput(t, "", editor, args...)
+}
+
+func runEditInput(t *testing.T, input string, editor func(path string) error, args ...string) (stdout, stderr string, installed *string, err error) {
 	t.Helper()
 
 	prevEditor := editorRunner
@@ -35,6 +42,7 @@ func runEdit(t *testing.T, editor func(path string) error, args ...string) (stdo
 	var out, errOut bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&errOut)
+	cmd.SetIn(strings.NewReader(input))
 	cmd.SetArgs(args)
 	err = cmd.Execute()
 	return out.String(), errOut.String(), captured, err
@@ -93,11 +101,10 @@ func TestEditFileWarningInstallAnyway(t *testing.T) {
 
 	// Interactive: warning triggers prompt; answer "a" (install anyway). File
 	// mode installs nothing, but the prompt path must be exercised.
-	prev := crontabLoader
-	t.Cleanup(func() { crontabLoader = prev })
+	prev := editorRunner
+	t.Cleanup(func() { editorRunner = prev })
 
 	editorRunner = rewriteEditor(warnCrontab)
-	defer func() { editorRunner = noopEditor }()
 
 	cmd := newEditCmd()
 	var out, errOut bytes.Buffer
@@ -121,8 +128,9 @@ func TestEditFileErrorAbort(t *testing.T) {
 	f.WriteString("# start\n")
 	f.Close()
 
+	prev := editorRunner
+	t.Cleanup(func() { editorRunner = prev })
 	editorRunner = rewriteEditor(errCrontab)
-	defer func() { editorRunner = noopEditor }()
 
 	cmd := newEditCmd()
 	var out, errOut bytes.Buffer
@@ -130,8 +138,8 @@ func TestEditFileErrorAbort(t *testing.T) {
 	cmd.SetErr(&errOut)
 	cmd.SetIn(strings.NewReader("r\n"))
 	cmd.SetArgs([]string{f.Name()})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute() error: %v", err)
+	if err := cmd.Execute(); !errors.Is(err, errCIThreshold) {
+		t.Fatalf("Execute() error = %v, want lint threshold error", err)
 	}
 	if !strings.Contains(out.String(), "never fires") {
 		t.Errorf("expected dead-expression error, got:\n%s", out.String())
@@ -148,7 +156,7 @@ func TestEditLiveCleanInstalls(t *testing.T) {
 	crontabLoader = staticLoader("* * * * * /old\n")
 	t.Cleanup(func() { crontabLoader = prev })
 
-	stdout, _, installed, err := runEdit(t, rewriteEditor(cleanCrontab), "--quiet")
+	stdout, _, installed, err := runEditInput(t, "yes\n", rewriteEditor(cleanCrontab), "--quiet")
 	if err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
@@ -206,8 +214,8 @@ func TestEditJSONReportsErrorWithoutInstalling(t *testing.T) {
 	t.Cleanup(func() { crontabLoader = prev })
 
 	stdout, _, installed, err := runEdit(t, rewriteEditor(errCrontab), "--quiet", "--json")
-	if err != nil {
-		t.Fatalf("Execute() error: %v", err)
+	if !errors.Is(err, errCIThreshold) {
+		t.Fatalf("Execute() error = %v, want lint threshold error", err)
 	}
 	if installed != nil {
 		t.Fatalf("json mode must not install a crontab with errors, got: %q", *installed)
@@ -231,7 +239,7 @@ func TestEditJSONReportsErrorWithoutInstalling(t *testing.T) {
 	}
 }
 
-func TestEditJSONCleanInstalls(t *testing.T) {
+func TestEditJSONCleanDoesNotInstall(t *testing.T) {
 	prev := crontabLoader
 	crontabLoader = staticLoader("* * * * * /old\n")
 	t.Cleanup(func() { crontabLoader = prev })
@@ -240,15 +248,156 @@ func TestEditJSONCleanInstalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
-	if installed == nil {
-		t.Fatal("clean crontab should install in json mode")
+	if installed != nil {
+		t.Fatal("json mode must not install without confirmation")
 	}
 	var res editResultJSON
 	if err := json.Unmarshal([]byte(stdout), &res); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
-	if !res.Installed || !res.Changed || !res.Lint.OK {
-		t.Errorf("expected installed+changed+ok, got %+v", res)
+	if res.Installed || !res.Changed || !res.Lint.OK {
+		t.Errorf("expected not-installed+changed+ok, got %+v", res)
+	}
+}
+
+func TestEditLiveConfirmationAndLintLoop(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		input       string
+		edits       []string
+		wantInstall bool
+		wantFailure bool
+	}{
+		{name: "clean declined", input: "no\n", edits: []string{cleanCrontab}},
+		{name: "clean EOF", edits: []string{cleanCrontab}},
+		{name: "warning overridden", input: "a\n", edits: []string{warnCrontab}, wantInstall: true},
+		{name: "error overridden", input: "a\n", edits: []string{errCrontab}, wantInstall: true},
+		{name: "error aborted", input: "r\n", edits: []string{errCrontab}, wantFailure: true},
+		{name: "error EOF", edits: []string{errCrontab}, wantFailure: true},
+		{name: "repeated edit choices", input: "e\ne\na\n", edits: []string{errCrontab, warnCrontab, errCrontab}, wantInstall: true},
+		{name: "repaired and confirmed", input: "e\nyes\n", edits: []string{errCrontab, cleanCrontab}, wantInstall: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			prev := crontabLoader
+			crontabLoader = staticLoader("# start\n")
+			t.Cleanup(func() { crontabLoader = prev })
+			calls := 0
+			editor := func(path string) error {
+				if calls >= len(tt.edits) {
+					t.Fatal("unexpected extra editor invocation")
+				}
+				content := tt.edits[calls]
+				calls++
+				return rewriteEditor(content)(path)
+			}
+			_, stderr, installed, err := runEditInput(t, tt.input, editor, "--quiet")
+			if (err != nil) != tt.wantFailure {
+				t.Fatalf("error = %v, want failure %v", err, tt.wantFailure)
+			}
+			if tt.wantFailure && !errors.Is(err, errCIThreshold) {
+				t.Fatalf("want lint threshold error, got %v", err)
+			}
+			if (installed != nil) != tt.wantInstall {
+				t.Fatalf("installed = %v, want %v", installed, tt.wantInstall)
+			}
+			if installed != nil && *installed != tt.edits[len(tt.edits)-1] {
+				t.Fatalf("installed stale content: %q", *installed)
+			}
+			if calls != len(tt.edits) {
+				t.Fatalf("editor calls = %d, want %d", calls, len(tt.edits))
+			}
+			if tt.edits[0] != cleanCrontab && !strings.Contains(stderr, "[e]dit again") {
+				t.Fatal("--quiet hid the actionable edit prompt")
+			}
+		})
+	}
+}
+
+func TestEditNonInstallingThreshold(t *testing.T) {
+	for _, mode := range []string{"--json", "--no-install"} {
+		for _, tt := range []struct {
+			name        string
+			content     string
+			level       string
+			wantFailure bool
+		}{
+			{name: "clean", content: cleanCrontab, level: "warning"},
+			{name: "warning blocked", content: warnCrontab, level: "warning", wantFailure: true},
+			{name: "warning allowed", content: warnCrontab, level: "error"},
+			{name: "error blocked", content: errCrontab, level: "error", wantFailure: true},
+		} {
+			t.Run(mode+"/"+tt.name, func(t *testing.T) {
+				prev := crontabLoader
+				crontabLoader = staticLoader("# start\n")
+				t.Cleanup(func() { crontabLoader = prev })
+				stdout, stderr, installed, err := runEditInput(t, "a\nyes\n", rewriteEditor(tt.content), "--quiet", mode, "--ci-level", tt.level)
+				if (err != nil) != tt.wantFailure {
+					t.Fatalf("error = %v, want failure %v", err, tt.wantFailure)
+				}
+				if installed != nil {
+					t.Fatal("non-installing mode invoked installer")
+				}
+				if strings.Contains(stderr, "[e]dit again") || strings.Contains(stdout, "Install the edited") {
+					t.Fatal("non-interactive mode prompted")
+				}
+				if mode == "--json" {
+					var res editResultJSON
+					if err := json.Unmarshal([]byte(stdout), &res); err != nil {
+						t.Fatalf("invalid JSON: %v", err)
+					}
+					if !res.Changed || res.Installed {
+						t.Fatalf("incorrect summary: %+v", res)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestEditEditorSubprocess(t *testing.T) {
+	if os.Getenv("GOBLIN_TEST_EDITOR") != "1" {
+		return
+	}
+	if err := os.WriteFile(os.Args[len(os.Args)-1], []byte(cleanCrontab), 0o600); err != nil {
+		os.Exit(2)
+	}
+	os.Stdout.WriteString("mock editor output\n")
+	os.Exit(0)
+}
+
+func TestRunEditorHonorsEDITOR(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOBLIN_TEST_EDITOR", "1")
+	t.Setenv("EDITOR", executable+" -test.run=^TestEditEditorSubprocess$ --")
+	t.Setenv("VISUAL", "goblin-nonexistent-visual-editor")
+	path := t.TempDir() + string(os.PathSeparator) + "edited cron.txt"
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout := os.Stdout
+	t.Cleanup(func() {
+		os.Stdout = stdout
+		reader.Close()
+		writer.Close()
+	})
+	os.Stdout = writer
+	editorErr := runEditor(path)
+	os.Stdout = stdout
+	writer.Close()
+	output, err := io.ReadAll(reader)
+	if err != nil || len(output) != 0 {
+		t.Fatalf("editor polluted JSON stdout: %q, error = %v", output, err)
+	}
+	if editorErr != nil {
+		t.Fatalf("mock $EDITOR failed: %v", editorErr)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil || string(content) != cleanCrontab {
+		t.Fatalf("mock editor content = %q, error = %v", content, err)
 	}
 }
 

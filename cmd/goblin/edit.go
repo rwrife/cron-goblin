@@ -164,11 +164,14 @@ func newEditCmd() *cobra.Command {
 			}
 
 			rules := buildLintRules(loc, cfg)
+			input := bufio.NewReader(cmd.InOrStdin())
+			cmd.SetIn(input)
 
 			// Edit -> lint -> prompt loop.
 			var report lint.Report
 			var edited string
 			blockedByLint := false
+			installApproved := false
 			for {
 				if eerr := editorRunner(workPath); eerr != nil {
 					if !quiet {
@@ -194,16 +197,16 @@ func newEditCmd() *cobra.Command {
 					break
 				}
 
-				// JSON mode is non-interactive: report and stop without
-				// installing. The caller (agent/CI) inspects .lint and decides.
-				if asJSON {
+				// Report-only modes never prompt or install.
+				if asJSON || noInstall {
 					blockedByLint = true
 					break
 				}
 
 				writeLintHuman(cmd, src, report, quiet)
-				action, aerr := promptEditAction(cmd, quiet)
+				action, aerr := promptEditAction(cmd, input)
 				if aerr != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "error: reading edit choice: %v\n", aerr)
 					return aerr
 				}
 				if action == actionEditAgain {
@@ -211,12 +214,10 @@ func newEditCmd() *cobra.Command {
 				}
 				if action == actionAbort {
 					fmt.Fprintln(cmd.OutOrStdout(), "Aborted. Nothing installed.")
-					if asJSON {
-						break
-					}
-					return nil
+					return errCIThreshold
 				}
 				// actionInstallAnyway: fall through to install.
+				installApproved = true
 				break
 			}
 
@@ -224,31 +225,45 @@ func newEditCmd() *cobra.Command {
 			installed := false
 
 			// Install path: only for the live crontab, only when it changed,
-			// and never under --no-install. A named-file edit already wrote to
+			// and never under --no-install or --json. A named-file edit already wrote to
 			// the file via the editor, so there's nothing extra to install.
-			if live && !noInstall && changed && !blockedByLint {
-				if ierr := crontabInstaller(edited); ierr != nil {
-					if !quiet {
-						fmt.Fprintln(cmd.ErrOrStderr(), goblin.Line(src))
+			if live && !noInstall && !asJSON && changed && !blockedByLint {
+				if !installApproved {
+					installApproved, err = confirm(cmd, "Install the edited crontab? [y/N] ")
+					if err != nil {
+						fmt.Fprintf(cmd.ErrOrStderr(), "error: reading install confirmation: %v\n", err)
+						return err
 					}
-					fmt.Fprintf(cmd.ErrOrStderr(), "error: installing crontab: %v\n", ierr)
-					return ierr
 				}
-				installed = true
+				if installApproved {
+					if ierr := crontabInstaller(edited); ierr != nil {
+						if !quiet {
+							fmt.Fprintln(cmd.ErrOrStderr(), goblin.Line(src))
+						}
+						fmt.Fprintf(cmd.ErrOrStderr(), "error: installing crontab: %v\n", ierr)
+						return ierr
+					}
+					installed = true
+				}
 			}
 
 			if asJSON {
-				return writeEditJSON(cmd, src, changed, installed, report)
+				if err := writeEditJSON(cmd, src, changed, installed, report); err != nil {
+					return err
+				}
+			} else {
+				writeEditHuman(cmd, src, report, changed, installed, live, noInstall, quiet)
 			}
-
-			writeEditHuman(cmd, src, report, changed, installed, live, noInstall, quiet)
+			if blockedByLint {
+				return errCIThreshold
+			}
 			return nil
 		},
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
 
-	cmd.Flags().BoolVar(&asJSON, "json", false, "emit a stable machine-readable summary (non-interactive)")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit a stable machine-readable summary without installing (non-interactive)")
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "silence the goblin's grumbling (stderr persona)")
 	cmd.Flags().StringVar(&tz, "tz", "",
 		"timezone for DST-hazard analysis (IANA name, e.g. America/New_York; off when unset)")
@@ -275,13 +290,10 @@ func buildLintRules(loc *time.Location, cfg config.Config) []lint.Rule {
 // promptEditAction shows the edit-again / install-anyway / abort menu on stderr
 // and reads a single choice from stdin. Any unrecognized input re-prompts.
 // EOF (e.g. a closed pipe) defaults to abort — the safe choice.
-func promptEditAction(cmd *cobra.Command, quiet bool) (editAction, error) {
-	reader := bufio.NewReader(cmd.InOrStdin())
+func promptEditAction(cmd *cobra.Command, reader *bufio.Reader) (editAction, error) {
 	for {
-		if !quiet {
-			fmt.Fprint(cmd.ErrOrStderr(),
-				"\n[e]dit again / install [a]nyway / abo[r]t? ")
-		}
+		fmt.Fprint(cmd.ErrOrStderr(),
+			"\n[e]dit again / install [a]nyway / abo[r]t? ")
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
@@ -301,10 +313,10 @@ func promptEditAction(cmd *cobra.Command, quiet bool) (editAction, error) {
 	}
 }
 
-// runEditor launches $EDITOR (fallback $VISUAL, then `vi`) on path, wiring the
+// runEditor launches $EDITOR (fallback `vi`) on path, wiring the
 // child to the real terminal so the user can actually edit.
 func runEditor(path string) error {
-	editor := firstNonEmpty(os.Getenv("VISUAL"), os.Getenv("EDITOR"), "vi")
+	editor := firstNonEmpty(os.Getenv("EDITOR"), "vi")
 	// Support editors configured with args, e.g. EDITOR="code --wait".
 	fields := strings.Fields(editor)
 	if len(fields) == 0 {
@@ -313,7 +325,7 @@ func runEditor(path string) error {
 	args := append(fields[1:], path)
 	c := exec.Command(fields[0], args...)
 	c.Stdin = os.Stdin
-	c.Stdout = os.Stdout
+	c.Stdout = os.Stderr
 	c.Stderr = os.Stderr
 	return c.Run()
 }
