@@ -140,6 +140,7 @@ func newRootCmd(version string) *cobra.Command {
 	cmd.AddCommand(newExportCmd())
 	cmd.AddCommand(newWatchCmd())
 	cmd.AddCommand(newDoctorCmd())
+	cmd.AddCommand(newEditCmd())
 	cmd.AddCommand(newCompletionCmd(cmd))
 
 	return cmd

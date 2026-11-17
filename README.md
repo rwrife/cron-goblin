@@ -108,6 +108,18 @@ every-minute loops, and expressions that never fire.
   via `crontab -l` and runs the same rules as `goblin lint` (`--json`, `--ci`,
   `--user`). A user with no crontab is reported calmly and exits zero.
   ✅ *available now*
+- **`goblin edit [file]`** — the author-time loop `crontab -e` skips: open a
+  crontab in `$EDITOR` (fallback `vi`), then **re-lint the moment you save**.
+  With no file argument it edits your live crontab (`crontab -l` → temp file →
+  edit → offered back to `crontab -`); with a file it edits in place. If lint
+  finds problems at or above the threshold (`--ci-level`), the goblin grumbles
+  and re-prompts (edit again / install anyway / abort) instead of silently
+  installing a crontab that never fires. Clean live edits also require an
+  explicit install confirmation; EOF declines installation. `--no-install`
+  lints only (never touches the live crontab); `--json` returns a stable
+  `{source, changed, installed, lint}` summary for agents without installing.
+  Both modes skip prompts and exit non-zero for findings at or above
+  `--ci-level`, as does aborting a failing interactive edit. ✅ *available now*
 - **`.goblinrc` (project config)** — drop a `.goblinrc` (TOML) at your repo root
   to pin a default `timezone` and a `[lint]` ruleset once, instead of every
   teammate passing flags. Goblin walks up from the working directory to find
