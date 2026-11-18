@@ -178,7 +178,7 @@ func Next(s parse.Schedule, from time.Time, loc *time.Location) (time.Time, erro
 		exists := cand.Hour() == c.hour && cand.Minute() == c.minute &&
 			cand.Day() == c.day && int(cand.Month()) == c.month
 
-		if exists && m.dayMatchesYMD(cand) && m.hour[c.hour] && m.minute[c.minute] {
+		if exists && cand.After(from) && m.dayMatchesYMD(cand) && m.hour[c.hour] && m.minute[c.minute] {
 			return cand, nil
 		}
 

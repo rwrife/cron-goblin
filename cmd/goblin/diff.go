@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/rwrife/cron-goblin/internal/explain"
@@ -381,7 +382,7 @@ func parseWindow(s string) (time.Duration, error) {
 	if n := len(s); n >= 2 && (s[n-1] == 'd' || s[n-1] == 'D') {
 		daysPart := s[:n-1]
 		days, err := parsePositiveInt(daysPart)
-		if err == nil {
+		if err == nil && days > 0 && int64(days) <= int64((1<<63-1)/(24*time.Hour)) {
 			return time.Duration(days) * 24 * time.Hour, nil
 		}
 		// Fall through to ParseDuration for anything not a clean "<int>d".
@@ -402,14 +403,12 @@ func parsePositiveInt(s string) (int, error) {
 	if s == "" {
 		return 0, fmt.Errorf("empty")
 	}
-	n := 0
 	for _, r := range s {
 		if r < '0' || r > '9' {
 			return 0, fmt.Errorf("not a whole number: %q", s)
 		}
-		n = n*10 + int(r-'0')
 	}
-	return n, nil
+	return strconv.Atoi(s)
 }
 
 // describeWindow produces the human/JSON label for the comparison span, so both
