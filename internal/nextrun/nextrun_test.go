@@ -55,9 +55,29 @@ func TestNextStrictlyAfter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Next: %v", err)
 	}
+
 	want := at(2026, time.June, 22, 10, 30)
 	if !got.Equal(want) {
 		t.Errorf("Next = %s, want %s (must be strictly after)", got.Format(time.RFC3339), want.Format(time.RFC3339))
+	}
+}
+
+func TestNextAdvancesPastFallBack(t *testing.T) {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	from, err := time.Parse(time.RFC3339, "2026-11-01T01:59:00-04:00")
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := Next(mustParse(t, "* * * * *"), from, loc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := time.Parse(time.RFC3339, "2026-11-01T02:00:00-05:00")
+	if !next.Equal(want) {
+		t.Fatalf("Next = %s, want %s", next, want)
 	}
 }
 

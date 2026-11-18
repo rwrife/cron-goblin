@@ -83,6 +83,22 @@ every-minute loops, and expressions that never fire.
   freeze, or a maintenance reboot. Also reports the single busiest minute and
   how many jobs pile onto it (then go `stagger` them). `--top`, `--tz`, and
   `--json` for agents. ✅ *available now*
+- **`goblin coverage <crontab> --want "every 15 minutes"`** — verify a desired
+  cadence against the union of all jobs. Reports **covered**, **under-covered**
+  (missing target fires), or **over-covered** (multiple jobs at a target minute).
+  Uses the existing English grammar or a five-field cron target; `--tz` selects
+  the analysis zone, `--window 30d` widens the default 7-day horizon, and `--json`
+  emits chronological `gaps: [{time}]` and
+  `redundancies: [{time, count, lines}]` (1-based crontab line numbers), plus
+  `expected`/`covered` counts and window bounds. Matching is exact-minute, not
+  average frequency: off-target fires do not cover a target or count as
+  redundancies. The interval is strictly after now through the window end;
+  days mean 24 hours. Gaps and redundancies can coexist (`under-covered` takes
+  precedence). No target fires means zero checked targets, not proof of coverage
+  beyond that horizon. Malformed jobs fail explicitly; empty crontabs leave all
+  targets uncovered. Exit is non-zero for gaps or input errors, zero for
+  redundancies alone. Reads stdin when the file is omitted or `-`.
+  ✅ *available now*
 - **`goblin from "every weekday at 6:30pm"`** — plain English → a cron
   expression. Deterministic and fully offline (a hand-rolled rule grammar, no
   LLM, no network); `--json` for agents. ✅ *available now*
