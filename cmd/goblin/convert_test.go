@@ -439,3 +439,110 @@ func TestConvertToSystemdUnsupported(t *testing.T) {
 		t.Errorf("expected a diagnostic on stderr, got: %q", stderr)
 	}
 }
+
+func TestConvertEventBridgeCLI(t *testing.T) {
+	stdout, stderr, err := runConvert(t, "--quiet", "--from", "eventbridge", "cron(0 9 ? * 2-6 *)")
+	if err != nil || !strings.HasPrefix(stdout, "0 9 * * 1-5\n") || !strings.Contains(stderr, "UTC-only") {
+		t.Fatalf("conversion = %q, %q, %v", stdout, stderr, err)
+	}
+	stdout, stderr, err = runConvert(t, "--json", "--from", "cron", "--to", "eventbridge", "0 9 * * 1-5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload convertJSON
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Result != "0 9 ? * 2-6 *" || !payload.PreviewAvailable || len(payload.Warnings) == 0 {
+		t.Fatalf("unexpected JSON: %+v", payload)
+	}
+	if len(payload.NextRuns) != 1 || !strings.HasSuffix(payload.NextRuns[0], "T09:00:00Z") {
+		t.Fatalf("EventBridge preview must use UTC: %v", payload.NextRuns)
+	}
+	if stderr != "" {
+		t.Fatalf("JSON warnings should be structured, not stderr: %q", stderr)
+	}
+}
+
+func TestConvertEventBridgeErrors(t *testing.T) {
+	for _, expr := range []string{"0 9 * * * *", "0 9 L * ? *", "0 9 15W * ? *", "0 9 ? * 0 *"} {
+		stdout, stderr, err := runConvert(t, "--quiet", "--json", "--from", "eventbridge", expr)
+		if err == nil || stdout != "" || !strings.Contains(stderr, "eventbridge") {
+			t.Errorf("%q = %q, %q, %v; want explicit refusal, no success JSON", expr, stdout, stderr, err)
+		}
+	}
+}
+
+func TestConvertJenkinsCLI(t *testing.T) {
+	stdout, stderr, err := runConvert(t, "--quiet", "--from", "jenkins", "--job-name", "stuff", "H/15 * * * *")
+	if err != nil || !strings.HasPrefix(stdout, "11,26,41,56 * * * *\n") || !strings.Contains(stderr, "job name \"stuff\"") {
+		t.Fatalf("Jenkins resolution = %q, %q, %v", stdout, stderr, err)
+	}
+	stdout, stderr, err = runConvert(t, "--quiet", "--json", "--from", "jenkins", "--job-name", "stuff", "H H(12-13) * * *")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload convertJSON
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Result != "56 13 * * *" || payload.JobName != "stuff" || len(payload.Warnings) == 0 || !payload.PreviewAvailable {
+		t.Fatalf("unexpected Jenkins source JSON: %+v", payload)
+	}
+	if stderr != "" {
+		t.Fatalf("JSON warnings should not leak to stderr: %q", stderr)
+	}
+}
+
+func TestConvertToJenkinsPreview(t *testing.T) {
+	for _, seed := range []string{"", "stuff"} {
+		t.Run(seed, func(t *testing.T) {
+			args := []string{"--quiet", "--json", "--from", "cron", "--to", "jenkins", "*/15 * * * *"}
+			if seed != "" {
+				args = append(args, "--job-name", seed)
+			}
+			stdout, stderr, err := runConvert(t, args...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var payload convertJSON
+			if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload.Result != "H/15 * * * *" || len(payload.Warnings) == 0 || stderr != "" {
+				t.Fatalf("unexpected Jenkins JSON: %+v; stderr=%q", payload, stderr)
+			}
+			if seed == "" {
+				if payload.PreviewAvailable || payload.Cron != "" || len(payload.NextRuns) != 0 || payload.NeverFires {
+					t.Fatalf("unresolved H must not pretend to have a concrete preview: %+v", payload)
+				}
+			} else {
+				if !payload.PreviewAvailable || payload.Cron != "11,26,41,56 * * * *" || len(payload.NextRuns) != 1 {
+					t.Fatalf("preview must describe the jittered schedule, not the source: %+v", payload)
+				}
+				next, err := time.Parse(time.RFC3339, payload.NextRuns[0])
+				if err != nil || (next.Minute() != 11 && next.Minute() != 26 && next.Minute() != 41 && next.Minute() != 56) {
+					t.Fatalf("preview is not a resolved Jenkins fire: %q, %v", payload.NextRuns[0], err)
+				}
+			}
+		})
+	}
+	stdout, stderr, err := runConvert(t, "--quiet", "--from", "cron", "--to", "jenkins", "0 9 * * *")
+	if err != nil || !strings.HasPrefix(stdout, "H 9 * * *\n") || strings.Contains(stdout, "# next:") || !strings.Contains(stderr, "changes fire times") {
+		t.Fatalf("unresolved human output = %q, %q, %v", stdout, stderr, err)
+	}
+}
+
+func TestConvertJenkinsErrors(t *testing.T) {
+	for _, args := range [][]string{
+		{"--from", "jenkins", "H * * * *"},
+		{"--from", "cron", "--to", "jenkins", "0,10,40 * * * *"},
+		{"--from", "jenkins", "--job-name", "stuff", "0 9 15 * 1"},
+		{"--from", "cron", "--to", "jenkins", "0 9 15 * 1"},
+	} {
+		stdout, stderr, err := runConvert(t, append([]string{"--quiet", "--json"}, args...)...)
+		if err == nil || stdout != "" || !strings.Contains(stderr, "jenkins") {
+			t.Errorf("%v = %q, %q, %v; want explicit refusal", args, stdout, stderr, err)
+		}
+	}
+}

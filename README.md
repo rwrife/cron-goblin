@@ -118,8 +118,37 @@ every-minute loops, and expressions that never fire.
   Kubernetes CronJob schedule. Only lossless conversions succeed; sub-minute
   precision, a specific year, Quartz's `L`/`W`/`#`, systemd's `~`, and a cron
   that pins both day-of-month and day-of-week (which Quartz can't express) are
-  refused with a specific error instead of a silent mistranslation. `--json` for
-  agents. ✅ *available now*
+  refused with a specific error instead of a silent mistranslation.
+  **AWS EventBridge rules** (`--from eventbridge` / `--to eventbridge`) use six
+  fields, `min hour day-of-month month day-of-week year`, not Quartz's leading
+  seconds field. Input may include the `cron(...)` wrapper; output is its six
+  inner fields. Numeric weekdays shift between cron's 0-6 and AWS's 1-7;
+  exactly one day field must be `?` (two `*` fields are invalid).
+  `goblin convert --from cron --to eventbridge "0 9 * * 1-5"` emits
+  `0 9 ? * 2-6 *`. AWS rules are **UTC-only**: fields are retained, not
+  timezone-converted, previews use UTC, and the command warns about this even
+  with `--quiet`. Specific years and calendar-relative `L` (last),
+  `W` (nearest weekday), and `#` (nth weekday) cannot be represented in standard
+  cron and are explicitly refused, not approximated.
+  **Jenkins** (`--from jenkins` / `--to jenkins`) understands `H`, `H/n`,
+  `H(a-b)`, `H(a-b)/n`, and Jenkins `@` macros. To resolve hashes, pass
+  `--job-name` with the full Jenkins job name, including folders:
+  `goblin convert --from jenkins --job-name stuff "H/15 * * * *"` emits
+  `11,26,41,56 * * * *`, matching Jenkins' MD5-seeded Java random sequence.
+  This assumes Jenkins' default macro hashing; custom controller overrides
+  are not modeled. `--to jenkins` intentionally **changes fire times** by
+  jittering only the minute field: a fixed minute becomes `H`, and a uniform
+  whole-hour interval such as `*/15` becomes `H/15`. Irregular minute patterns
+  are refused rather than silently changing cadence; an every-minute schedule
+  stays `*`. Jenkins ANDs its day fields, whereas cron ORs restricted day
+  fields, so incompatible both-day constraints are refused in both directions.
+  With `--job-name`, previews describe the resolved target, not the original
+  schedule. Without it, `--to jenkins` can emit unresolved `H`, but reports no
+  concrete preview. Hash resolution is for one schedule line; preceding lines
+  in an existing Jenkins trigger consume hashes and may alter its values.
+  `--json` supports both dialects, adding structured `warnings`, `job_name`
+  when supplied, and `preview_available`; unresolved targets have `cron: ""`,
+  `next_runs: []`, and `never_fires: false`. ✅ *available now*
 - **`goblin doctor`** — lint the crontab you actually have installed: reads it
   via `crontab -l` and runs the same rules as `goblin lint` (`--json`, `--ci`,
   `--user`). A user with no crontab is reported calmly and exits zero.

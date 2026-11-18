@@ -37,14 +37,17 @@ import (
 // scraping prose. On a lossy/impossible conversion the command errors out
 // instead, so a successful JSON object always carries a usable Result string.
 type convertJSON struct {
-	From       string   `json:"from"`        // source dialect name
-	To         string   `json:"to"`          // target dialect name (cron, quartz, or k8s)
-	Source     string   `json:"source"`      // the original expression
-	Result     string   `json:"result"`      // the converted expression, in the target dialect
-	Cron       string   `json:"cron"`        // the canonical 5-field cron the result is built from
-	English    string   `json:"english"`     // plain-English readback of the result
-	NextRuns   []string `json:"next_runs"`   // ISO fire times (local TZ)
-	NeverFires bool     `json:"never_fires"` // true when the result never fires
+	From             string   `json:"from"`        // source dialect name
+	To               string   `json:"to"`          // target dialect name
+	Source           string   `json:"source"`      // the original expression
+	Result           string   `json:"result"`      // the converted expression, in the target dialect
+	Cron             string   `json:"cron"`        // resolved preview schedule; empty for unresolved H
+	English          string   `json:"english"`     // plain-English readback of the result
+	NextRuns         []string `json:"next_runs"`   // ISO fire times (UTC for EventBridge, otherwise local)
+	NeverFires       bool     `json:"never_fires"` // true when the result never fires
+	Warnings         []string `json:"warnings,omitempty"`
+	JobName          string   `json:"job_name,omitempty"`
+	PreviewAvailable bool     `json:"preview_available"`
 }
 
 // newConvertCmd builds the `convert` subcommand.
@@ -56,14 +59,29 @@ func newConvertCmd() *cobra.Command {
 		count     int
 		quiet     bool
 		k8sMacros bool
+		jobName   string
 	)
 
 	cmd := &cobra.Command{
 		Use:   "convert --from <dialect> <expression>",
-		Short: "Convert a cron schedule from another dialect into standard cron",
+		Short: "Convert cron dialects, including AWS EventBridge and Jenkins",
 		Long: "Translate a cron schedule between dialects. Deterministic and fully\n" +
 			"offline.\n\n" +
+			"EventBridge (--from/--to eventbridge) uses 6 fields (min hour DOM\n" +
+			"month DOW year), optionally wrapped in cron(). Exactly one day field\n" +
+			"must be `?`; weekdays are 1-7 and AWS rules use UTC only. L/W/# and\n" +
+			"restricted years have no standard-cron equivalent and are refused.\n\n" +
+			"Jenkins (--from/--to jenkins) supports H, H/n, H(a-b), H(a-b)/n\n" +
+			"and its @macros. --job-name must be the full job name to resolve H.\n" +
+			"Resolution assumes one trigger line and default Jenkins macro hashing.\n" +
+			"--to jenkins intentionally jitters the minute, changing fire times;\n" +
+			"without --job-name an unresolved H has no preview (cron is empty in\n" +
+			"JSON, preview_available=false, not evidence that it never fires).\n" +
+			"Jenkins ANDs day fields rather than ORing them; unrepresentable\n" +
+			"both-day restrictions are refused.\n\n" +
 			"Supported source dialects (--from):\n" +
+			"  eventbridge  AWS rule cron (6 fields, UTC-only).\n" +
+			"  jenkins     numeric 5-field cron with H hashing and @macros.\n" +
 			"  quartz  6/7-field Java Quartz, with `?`, 1-7 SUN-SAT weekdays,\n" +
 			"          and an optional year.\n" +
 			"  systemd systemd.timer OnCalendar (DayOfWeek Y-M-D H:M:S), plus the\n" +
@@ -74,13 +92,16 @@ func newConvertCmd() *cobra.Command {
 			"          vixie-only @reboot and pasted-in Quartz specials.\n" +
 			"  cron    standard 5-field cron (the default; useful with --to quartz).\n\n" +
 			"Supported target dialects (--to, default cron):\n" +
+			"  eventbridge  AWS rule cron (6 fields, UTC-only).\n" +
+			"  jenkins     H-jittered minute field (intentional schedule change).\n" +
 			"  cron    standard 5-field cron.\n" +
 			"  quartz  6-field Quartz (seconds prepended, `?` in the unused day\n" +
 			"          field, weekdays renumbered 1-7). Refuses the one shape Quartz\n" +
 			"          can't express: a cron that pins both day-of-month and day-of-week.\n" +
 			"  k8s     a Kubernetes CronJob schedule (5-field cron; add --k8s-macros\n" +
 			"          to collapse canonical forms to @daily/@hourly/... ).\n\n" +
-			"Only lossless conversions succeed. Constructs the target cannot express\n" +
+			"Except for explicit Jenkins jitter, only lossless conversions succeed.\n" +
+			"Constructs the target cannot express\n" +
 			"— sub-minute (seconds) precision, a specific year, Quartz's `L`/`W`/`#`,\n" +
 			"systemd's `~`, or a both-day-fields cron into Quartz — are refused with a\n" +
 			"specific error rather than silently mistranslated.\n\n" +
@@ -109,15 +130,14 @@ func newConvertCmd() *cobra.Command {
 				fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", err)
 				return err
 			}
-			// Supported targets: standard cron, Quartz, and k8s. systemd output is
-			// not implemented yet (its richer grammar has no single obvious form).
+			// systemd output has no single obvious canonical form yet.
 			if dstDialect == dialect.Systemd {
-				err := fmt.Errorf("converting to %q is not supported yet (targets: cron, quartz, k8s)", to)
+				err := fmt.Errorf("converting to %q is not supported yet (targets: cron, quartz, k8s, eventbridge, jenkins)", to)
 				fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", err)
 				return err
 			}
 
-			cronExpr, err := convertToCron(srcDialect, source)
+			cronExpr, err := convertToCron(srcDialect, source, jobName)
 			if err != nil {
 				// The goblin grumbles, then we print the concrete diagnostic. On a
 				// lossy refusal, add a one-line hint about *why* it can't be helped.
@@ -142,17 +162,7 @@ func newConvertCmd() *cobra.Command {
 				return perr
 			}
 
-			readback := explain.Explain(sched)
-			runs := nextrun.NextN(sched, time.Now(), count, time.Local)
-			never := len(runs) == 0
-			isoRuns := make([]string, len(runs))
-			for i, t := range runs {
-				isoRuns[i] = t.Format(time.RFC3339)
-			}
-
-			// Serialize the normalized cron into the requested target dialect. The
-			// English readback and next-run preview above come from the canonical
-			// Schedule, so they stay correct regardless of how the result is spelled.
+			// Resolve intentional target jitter before computing its preview.
 			resultExpr, err := renderToDialect(dstDialect, sched.Raw, k8sMacros)
 			if err != nil {
 				if !quiet {
@@ -167,16 +177,64 @@ func newConvertCmd() *cobra.Command {
 				return err
 			}
 
+			var warnings []string
+			location := time.Local
+			if srcDialect == dialect.EventBridge || dstDialect == dialect.EventBridge {
+				location = time.UTC
+				warnings = append(warnings, "EventBridge rules are UTC-only: clock fields are retained, not timezone-converted. Exactly one day field must be `?`.")
+			}
+			if srcDialect == dialect.Jenkins && jobName != "" {
+				warnings = append(warnings, fmt.Sprintf("Jenkins H resolved using the full job name %q; renaming the job changes its schedule.", jobName))
+			}
+			previewAvailable := true
+			if dstDialect == dialect.Jenkins {
+				warnings = append(warnings, "Jenkins jitter intentionally changes fire times; only the minute field is jittered, not the original exact schedule.")
+				if strings.Contains(resultExpr, "H") {
+					if strings.TrimSpace(jobName) == "" {
+						previewAvailable = false
+						warnings = append(warnings, "Pass --job-name to resolve H and preview the jittered schedule.")
+					} else {
+						resolved, resolveErr := dialect.FromJenkins(resultExpr, jobName)
+						if resolveErr != nil {
+							fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", resolveErr)
+							return resolveErr
+						}
+						sched, err = parse.Parse(resolved)
+						if err != nil {
+							fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", err)
+							return err
+						}
+						warnings = append(warnings, fmt.Sprintf("Jenkins H resolves to %q for job %q.", sched.Raw, jobName))
+					}
+				}
+			}
+			readback := "Jenkins chooses stable H values from the full job name; no concrete schedule preview is available."
+			canonicalCron := ""
+			var runs []time.Time
+			if previewAvailable {
+				canonicalCron = sched.Raw
+				readback = explain.Explain(sched)
+				runs = nextrun.NextN(sched, time.Now(), count, location)
+			}
+			never := previewAvailable && len(runs) == 0
+			isoRuns := make([]string, len(runs))
+			for i, t := range runs {
+				isoRuns[i] = t.Format(time.RFC3339)
+			}
+
 			if asJSON {
 				payload := convertJSON{
-					From:       string(srcDialect),
-					To:         string(dstDialect),
-					Source:     source,
-					Result:     resultExpr,
-					Cron:       sched.Raw,
-					English:    readback,
-					NextRuns:   isoRuns,
-					NeverFires: never,
+					From:             string(srcDialect),
+					To:               string(dstDialect),
+					Source:           source,
+					Result:           resultExpr,
+					Cron:             canonicalCron,
+					English:          readback,
+					NextRuns:         isoRuns,
+					NeverFires:       never,
+					Warnings:         warnings,
+					JobName:          jobName,
+					PreviewAvailable: previewAvailable,
 				}
 				enc := json.NewEncoder(cmd.OutOrStdout())
 				enc.SetIndent("", "  ")
@@ -191,6 +249,12 @@ func newConvertCmd() *cobra.Command {
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), resultExpr)
 			fmt.Fprintf(cmd.OutOrStdout(), "# %s\n", readback)
+			for _, warning := range warnings {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", warning)
+			}
+			if !previewAvailable {
+				return nil
+			}
 			if never {
 				fmt.Fprintln(cmd.OutOrStdout(),
 					"# (heads up: this schedule never actually fires)")
@@ -203,8 +267,9 @@ func newConvertCmd() *cobra.Command {
 		SilenceErrors: true,
 	}
 
-	cmd.Flags().StringVar(&from, "from", "", "source dialect to convert from (quartz, systemd, k8s)")
-	cmd.Flags().StringVar(&to, "to", "cron", "target dialect (cron, quartz, k8s)")
+	cmd.Flags().StringVar(&from, "from", "", "source dialect (cron, quartz, systemd, k8s, eventbridge, jenkins)")
+	cmd.Flags().StringVar(&to, "to", "cron", "target dialect (cron, quartz, k8s, eventbridge, jenkins)")
+	cmd.Flags().StringVar(&jobName, "job-name", "", "full Jenkins job name (including folders), used as the H hash seed")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit a machine-readable JSON result")
 	cmd.Flags().IntVarP(&count, "count", "n", 1, "how many upcoming runs to compute for the preview")
 	cmd.Flags().BoolVar(&quiet, "quiet", false, "silence the goblin's grumbling (stderr persona)")
@@ -217,7 +282,7 @@ func newConvertCmd() *cobra.Command {
 // convertToCron dispatches to the right dialect converter. It exists as a small
 // seam so additional source dialects (systemd, etc.) slot in without touching
 // the command wiring, and so the "not yet supported" story is one clear place.
-func convertToCron(src dialect.Dialect, expr string) (string, error) {
+func convertToCron(src dialect.Dialect, expr, jobName string) (string, error) {
 	switch src {
 	case dialect.Quartz:
 		return dialect.FromQuartz(expr)
@@ -237,6 +302,10 @@ func convertToCron(src dialect.Dialect, expr string) (string, error) {
 		return dialect.FromK8s(expr)
 	case dialect.Systemd:
 		return dialect.FromSystemd(expr)
+	case dialect.EventBridge:
+		return dialect.FromEventBridge(expr)
+	case dialect.Jenkins:
+		return dialect.FromJenkins(expr, jobName)
 	default:
 		return "", fmt.Errorf("converting from %q is not supported", src)
 	}
@@ -259,6 +328,10 @@ func renderToDialect(dst dialect.Dialect, cron5 string, k8sMacros bool) (string,
 		return dialect.ToQuartz(cron5)
 	case dialect.K8s:
 		return dialect.ToK8s(cron5, k8sMacros)
+	case dialect.EventBridge:
+		return dialect.ToEventBridge(cron5)
+	case dialect.Jenkins:
+		return dialect.ToJenkins(cron5)
 	default:
 		return "", fmt.Errorf("converting to %q is not supported", dst)
 	}

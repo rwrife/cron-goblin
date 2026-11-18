@@ -42,6 +42,10 @@ const (
 	// K8s is the Kubernetes CronJob schedule dialect. In practice it is standard
 	// 5-field cron, so it is treated as an alias of Cron for validation.
 	K8s Dialect = "k8s"
+	// EventBridge is AWS's six-field UTC cron (minute through year).
+	EventBridge Dialect = "eventbridge"
+	// Jenkins is five-field cron with deterministic H load spreading.
+	Jenkins Dialect = "jenkins"
 )
 
 // ParseDialect resolves a case-insensitive dialect name (plus a few common
@@ -56,8 +60,12 @@ func ParseDialect(name string) (Dialect, error) {
 		return Systemd, nil
 	case "k8s", "kubernetes", "cronjob":
 		return K8s, nil
+	case "eventbridge", "aws", "cloudwatch":
+		return EventBridge, nil
+	case "jenkins":
+		return Jenkins, nil
 	default:
-		return "", fmt.Errorf("unknown dialect %q (supported: cron, quartz, k8s, systemd)", name)
+		return "", fmt.Errorf("unknown dialect %q (supported: cron, quartz, k8s, systemd, eventbridge, jenkins)", name)
 	}
 }
 
