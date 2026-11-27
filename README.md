@@ -234,18 +234,9 @@ Prebuilt binaries for Linux, macOS, and Windows ship on every tagged release
   prebuilt binaries (Linux/macOS/Windows, amd64 + arm64) and checksums on every
   tagged release — the release tag is stamped into `goblin --version`.
 
-That's the v0.1 milestone arc complete. See
-[`PLAN.md`](./PLAN.md) for the roadmap and the v0.2+ backlog (the DST danger
-report has since landed in `goblin lint --tz`, the thundering-herd
-auto-stagger in `goblin stagger`, dialect translation now covers Quartz,
-systemd `OnCalendar`, and Kubernetes CronJob schedules in `goblin convert`
-(both directions — `--from` and `--to` — for Quartz and k8s),
-`goblin diff` shows how fire times shift between two schedules, the calendar
-export lands in `goblin export` (next fire times to an `.ics`), and the watch
-mode lands in `goblin watch` (a live countdown to the next fire across jobs);
-natural-language *out* lands in `goblin narrate` (a changelog-ready prose
-one-liner for a schedule, or a schedule change via `--from`/`--to`);
-richer dialect coverage and the rest remain).
+The v0.1 milestone arc and the originally listed v0.2+ backlog are complete.
+[`PLAN.md`](./PLAN.md) records the delivered backlog and the project's scope
+boundaries.
 
 ## Install
 

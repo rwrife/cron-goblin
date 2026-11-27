@@ -21,3 +21,6 @@ goreleaser-dist/
 # Local config
 .goblinrc
 *.local
+
+# Git worktrees
+/.worktrees/

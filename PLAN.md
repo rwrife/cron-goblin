@@ -135,22 +135,21 @@ Key modules:
    grammar, `--quiet`, shell completions, `goblin doctor` for the current user's
    crontab, release workflow (`goreleaser`) + install docs.
 
-## 8. Backlog / future features (v0.2+)
+## 8. Delivered backlog (v0.2+)
 
-1. **DST danger report** — flag schedules that double-fire or skip on clock changes
-   for a chosen timezone.
-2. **"Thundering herd" detector** — warn when N jobs share a minute and suggest a
-   jittered spread (e.g. auto-stagger like the tool-lab cron staggering itself).
-3. **Quartz / k8s CronJob / systemd-timer dialects** — translate between formats.
-4. **`goblin diff old new`** — show how fire times change between two schedules.
-5. **Natural-language *out*** — speak a schedule aloud-style summary for changelogs.
-6. **Crontab "blame"** — annotate each line with last-edited + next-run inline.
-7. **Watch mode** — `goblin watch` live-counts down to the next fire across jobs.
-8. **Calendar export** — dump the next month of fire times to `.ics`.
-9. **Config profiles** — per-project default timezone + lint ruleset in `.goblinrc`.
-10. **Plugin rules** — load extra lint rules from a user dir.
-11. **Editor integration** — `$EDITOR` hook so `crontab -e` pipes through goblin lint.
-12. **Severity budget / `--ci`** — non-zero exit on warnings for pipelines.
+The original post-v0.1 backlog is implemented:
+
+- DST safety and collision/stagger analysis (`lint --tz`, `gaps`, `stagger`).
+- Schedule comparison, narration, per-line explanations, watch mode, and calendar
+  export (`diff`, `narrate`, `blame`, `watch`, `export`).
+- Dialect conversion for Quartz, Kubernetes CronJobs, systemd, AWS EventBridge,
+  and Jenkins (`convert`), with explicit refusals for unsupported/lossy forms.
+- Target-cadence coverage, project config, declarative plugin rules, editor-assisted
+  linting, and CI severity thresholds (`coverage`, `.goblinrc`, `--rules-dir`,
+  `edit`, `--ci-level`).
+
+The native parser and scheduler remain standard five-field cron; dialect adapters
+translate supported external forms without adding seconds-precision scheduling.
 
 ## 9. Out of scope
 
@@ -158,7 +157,8 @@ Key modules:
   That's cronitor/healthchecks territory; cron-goblin is design-time only.
 - **A scheduler / job runner** — we never execute commands. We read and explain.
 - **A hosted service, web app, accounts, or telemetry.** Local, offline, no network.
-- **Six-field / seconds-precision cron** in v0.1 (standard 5-field first; dialects
-  are backlog).
+- **Seconds-precision scheduling** — external dialect adapters may accept a
+  seconds field only when it can be losslessly translated; the native parser and
+  scheduler remain five-field cron.
 - **LLM-powered English parsing** — must stay deterministic and offline; rules only.
 - **GUI / desktop app** — terminal is the whole point.
